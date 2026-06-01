@@ -43,7 +43,7 @@ export class ThermalKettleInertiaStrategy implements InertiaUpdateStrategy {
       // 3. The Two-Line Warp Calculations
       const rawNextMom = tf.sub(tf.mul(momFloat, dynamicLambda), tf.mul(safeGradients, scaleForce)) as tf.Tensor2D;
 
-      const boundedMom = tf.clipByValue(rawNextMom, -32.0, 31.0);
+      const boundedMom = tf.clipByValue(rawNextMom, -31.0, 31.0);
 
       // 4. Stochastic Floor Write-Back Gate
       const floorMom = tf.floor(boundedMom);

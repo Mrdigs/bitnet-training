@@ -23,7 +23,7 @@ Every parameter inside the layer matrix maps its complete optimization lifecycle
        │
        └────────────────► Bits [2:7] (6 bits): Signed Momentum Counter
                                                Two's Complement signed integer
-                                               Bounded boundaries: -32 to +31
+                                               Bounded boundaries: -31 to +31
 ```
 
 ### No-Bitwise Polyfill Vector Arithmetic
@@ -117,7 +117,7 @@ The optimization lifecycle of our low-bit parameter space operates under four di
 
 ### A. The Principle of Critical Mass Threshold Accumulation
 
-Unlike high-precision optimizers that apply microscopic continuous adjustments every single step, our 1-byte parameters utilize an exponential-saturation lookup gate. A parameter is protected by an **Inertial Shield** early in its trajectory. It cannot randomly flip its state due to raw batch noise. It must earn the right to change its forward-pass token by accumulating sustained, uniform directional gradient energy over dozens of consecutive steps. The momentum counter acts as an energy accumulator; once it packs enough kinetic force to hit the extreme boundary thresholds ($-32$ to $+31$), it reaches its structural melting point, guaranteeing a 100% phase transition.
+Unlike high-precision optimizers that apply microscopic continuous adjustments every single step, our 1-byte parameters utilize an exponential-saturation lookup gate. A parameter is protected by an **Inertial Shield** early in its trajectory. It cannot randomly flip its state due to raw batch noise. It must earn the right to change its forward-pass token by accumulating sustained, uniform directional gradient energy over dozens of consecutive steps. The momentum counter acts as an energy accumulator; once it packs enough kinetic force to hit the extreme boundary thresholds ($-31$ to $+31$), it reaches its structural melting point, guaranteeing a 100% phase transition.
 
 ### B. The Rest Cradle Equilibrium & 0% Volatility Filter
 

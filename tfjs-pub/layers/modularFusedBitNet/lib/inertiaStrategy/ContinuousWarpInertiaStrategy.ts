@@ -31,8 +31,8 @@ export class ContinuousWarpInertiaStrategy implements InertiaUpdateStrategy {
       // Analytical gradient direction rule: Negative gradient forces push positive.
       const rawNextMom = tf.sub(tf.mul(momFloat, this.lambda), tf.mul(safeGradients, scaleForce)) as tf.Tensor2D;
 
-      // Strict 6-bit register saturation clipping protection boundary (-32 to +31)
-      const boundedMom = tf.clipByValue(rawNextMom, -32.0, 31.0);
+      // Strict 6-bit register saturation clipping protection boundary (-31 to +31)
+      const boundedMom = tf.clipByValue(rawNextMom, -31.0, 31.0);
 
       // Line 2: Stochastic Rounding Layer 1 Gate (Casts continuous float matrices back to signed integers)
       // Evaluates the fractional remainder probabilistically using a random uniform mask.

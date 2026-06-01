@@ -2,10 +2,10 @@ import * as tf from "@tensorflow/tfjs";
 import { ParameterStorageCodec } from "../interfaces";
 
 export class DynamicSymmetricalCodec implements ParameterStorageCodec {
-  private initialAdamWeights: tf.Tensor2D | null;
+  private initialWeights: tf.Tensor2D | null;
 
-  constructor(initialAdamWeights: tf.Tensor2D | null = null) {
-    this.initialAdamWeights = initialAdamWeights;
+  constructor(initialWeights: tf.Tensor2D | null = null) {
+    this.initialWeights = initialWeights;
   }
 
   public unpack(fused: tf.Tensor2D): { weight: tf.Tensor2D; momentum: tf.Tensor2D } {
@@ -22,7 +22,7 @@ export class DynamicSymmetricalCodec implements ParameterStorageCodec {
   public pack(weight: tf.Tensor2D, momentum: tf.Tensor2D): tf.Tensor2D {
     return tf.tidy(() => {
       const clampedWeight = tf.clipByValue(weight, 0, 2);
-      const clampedMomentum = tf.clipByValue(momentum, -32, 31);
+      const clampedMomentum = tf.clipByValue(momentum, -31, 31);
       const isMomNeg = tf.less(clampedMomentum, tf.scalar(0, "int32"));
       const unsignedMomentum = tf.where(isMomNeg, tf.add(clampedMomentum, tf.scalar(64, "int32")), clampedMomentum);
       const shiftedMomentum = tf.mul(unsignedMomentum, tf.scalar(4, "int32"));
@@ -32,11 +32,11 @@ export class DynamicSymmetricalCodec implements ParameterStorageCodec {
 
   public getInitialState(inFeatures: number, outFeatures: number): tf.Tensor2D {
     return tf.tidy(() => {
-      if (!this.initialAdamWeights) {
+      if (!this.initialWeights) {
         return tf.ones([inFeatures, outFeatures], "int32") as tf.Tensor2D;
       }
 
-      const wFloats = this.initialAdamWeights;
+      const wFloats = this.initialWeights;
 
       // FIX: Auto-calculate the variance threshold dynamically from the matrix physics
       const stdDev = tf.sqrt(tf.mean(tf.square(tf.sub(wFloats, tf.mean(wFloats)))));

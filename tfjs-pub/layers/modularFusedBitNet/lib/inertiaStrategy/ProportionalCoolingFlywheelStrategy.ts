@@ -42,8 +42,8 @@ export class ProportionalCoolingFlywheelStrategy implements InertiaUpdateStrateg
       // 2. Pure Branchless Two-Line Warp Calculus Core
       const rawNextMom = tf.sub(tf.mul(momFloat, dynamicLambda), tf.mul(safeGradients, scaleForce)) as tf.Tensor2D;
 
-      // Strict 6-bit signed integer register clipping protection boundaries (-32 to +31)
-      const boundedMom = tf.clipByValue(rawNextMom, -32.0, 31.0);
+      // Strict 6-bit signed integer register clipping protection boundaries (-31 to +31)
+      const boundedMom = tf.clipByValue(rawNextMom, -31.0, 31.0);
 
       // 3. Stochastic Floor Rounding Layer 1 Gate
       const floorMom = tf.floor(boundedMom);

@@ -29,7 +29,7 @@ export class ClassicBrakingStrategy implements InertiaUpdateStrategy {
       const finalStepDeltaFloat = tf.where(activeAcceleration, tf.mul(accelStep, gradSign), tf.mul(brakeStep, momSign));
 
       const updatedMomUnclamped = tf.add(currentMomentum, finalStepDeltaFloat.toInt());
-      return tf.clipByValue(updatedMomUnclamped, -32, 31) as tf.Tensor2D;
+      return tf.clipByValue(updatedMomUnclamped, -31, 31) as tf.Tensor2D;
     });
   }
 }

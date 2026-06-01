@@ -6,10 +6,13 @@ import { BitNetGammaQuantizer } from "./lib/quantizer/BitNetGammaQuantizer";
 import { ContinuousWarpInertiaStrategy } from "./lib/inertiaStrategy/ContinuousWarpInertiaStrategy";
 import { TernaryStepGateStrategy } from "./lib/gateStrategy/TernaryStepGateStrategy";
 import { Fused2bW6bMCodec } from "./lib/codec/Fused2bW6bMCodec";
+import { ProportionalCoolingFlywheelStrategy } from "./lib/inertiaStrategy/ProportionalCoolingFlywheelStrategy";
+import { SymmetricalVarianceQuantizer } from "./lib/quantizer/SymmetricalVarianceQuantizer";
 
 export interface LayerConfig {
   inFeatures: number;
   outFeatures: number;
+  initialWeights: tf.Tensor2D;
   gradScale?: number;
   K?: number;
   codec?: ParameterStorageCodec;
@@ -48,10 +51,8 @@ export class FusedBitNetLayer {
     this.gradScale = config.gradScale ?? 30.0;
     this.K = config.K ?? 0.5;
 
-    this.codec = config.codec ?? new Fused2bW6bMCodec();
-    this.quantizer = config.quantizer ?? new BitNetGammaQuantizer();
-    this.inertiaStrategy = config.inertiaStrategy ?? new ContinuousWarpInertiaStrategy(0.85);
-    this.gateStrategy = config.gateStrategy ?? new TernaryStepGateStrategy();
+    this.codec = config.codec ?? new DynamicSymmetricalCodec(config.initialWeights);
+    ((this.quantizer = config.quantizer ?? new SymmetricalVarianceQuantizer(config.initialWeights)), (this.inertiaStrategy = config.inertiaStrategy ?? new ProportionalCoolingFlywheelStrategy(0.75, 1.0, 1.5)), (this.gateStrategy = config.gateStrategy ?? new TernaryStepGateStrategy()));
 
     // 1. Allocate initial discrete state containers
     this.packedState = this.codec.getInitialState(this.inFeatures, this.outFeatures);
@@ -120,6 +121,13 @@ export class FusedBitNetLayer {
       const oldPacked = this.packedState;
       this.packedState = tf.keep(nextPackedState);
       oldPacked.dispose();
+    });
+  }
+
+  public getWeights(): tf.Tensor2D {
+    return tf.tidy(() => {
+      const { weight } = this.codec.unpack(this.packedState);
+      return this.quantizer.transformWeights(weight);
     });
   }
 

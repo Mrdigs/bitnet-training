@@ -58,7 +58,7 @@ export class KineticInertiaStrategy implements InertiaUpdateStrategy {
       );
 
       const updatedMomUnclamped = tf.add(currentMomentum, finalStepDeltaFloat.toInt());
-      return tf.clipByValue(updatedMomUnclamped, -32, 31) as tf.Tensor2D;
+      return tf.clipByValue(updatedMomUnclamped, -31, 31) as tf.Tensor2D;
     });
   }
 }

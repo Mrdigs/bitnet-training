@@ -83,6 +83,18 @@ export class BaselineAdamBitNetLayer {
     });
   }
 
+  public getWeights(): tf.Tensor2D {
+    return tf.tidy(() => {
+      const meanVal = tf.mean(this.shadowWeights);
+      const stdDev = tf.sqrt(tf.mean(tf.square(tf.sub(this.shadowWeights, meanVal))));
+      const threshold = tf.mul(stdDev, tf.scalar(0.65, "float32"));
+
+      const ternaryWeights = tf.where(tf.less(this.shadowWeights, tf.neg(threshold)), tf.fill(this.shadowWeights.shape, -1.0), tf.where(tf.greater(this.shadowWeights, threshold), tf.fill(this.shadowWeights.shape, 1.0), tf.fill(this.shadowWeights.shape, 0.0))) as tf.Tensor2D;
+
+      return ternaryWeights;
+    });
+  }
+
   public dispose(): void {
     if (this.shadowWeights) this.shadowWeights.dispose();
     if (this.m) this.m.dispose();

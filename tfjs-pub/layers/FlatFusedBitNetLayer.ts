@@ -69,12 +69,12 @@ export class FlatFusedBitNetLayer {
     return tf.tidy(() => {
       // 1. Constrain boundaries
       const clampedWeight = tf.clipByValue(weight, 0, 2);
-      const clampedMomentum = tf.clipByValue(momentum, -32, 31);
+      const clampedMomentum = tf.clipByValue(momentum, -31, 31);
 
       // 2. Mask momentum to 6-bit Unsigned (clampedMomentum & 0x3F)
       //    For positive numbers (0-31), this does nothing.
-      //    For negative numbers (-32 to -1), we must add 64 to get the unsigned binary form.
-      //    Example: -1 becomes 63 (111111), -32 becomes 32 (100000).
+      //    For negative numbers (-31 to -1), we must add 64 to get the unsigned binary form.
+      //    Example: -1 becomes 63 (111111), -31 becomes 32 (100000).
       const isMomNeg = tf.less(clampedMomentum, tf.scalar(0, "int32"));
       const unsignedMomentum = tf.where(isMomNeg, tf.add(clampedMomentum, tf.scalar(64, "int32")), clampedMomentum);
 
@@ -118,7 +118,7 @@ export class FlatFusedBitNetLayer {
       const finalStepDeltaFloat = tf.where(activeAcceleration, tf.mul(accelStep, gradSign), tf.mul(brakeStep, momSign));
 
       const updatedMomUnclamped = tf.add(currentMomentum, finalStepDeltaFloat.toInt());
-      return tf.clipByValue(updatedMomUnclamped, -32, 31) as tf.Tensor2D;
+      return tf.clipByValue(updatedMomUnclamped, -31, 31) as tf.Tensor2D;
     });
   }
 
@@ -150,7 +150,7 @@ export class FlatFusedBitNetLayer {
 
       const actualFlipOccurred = tf.logicalOr(tf.greater(weightIncrement, 0), tf.greater(weightDecrement, 0));
       const positiveDamp = tf.clipByValue(tf.sub(momentum, tf.scalar(3, "int32")), 0, 31);
-      const negativeDamp = tf.clipByValue(tf.add(momentum, tf.scalar(3, "int32")), -32, 0);
+      const negativeDamp = tf.clipByValue(tf.add(momentum, tf.scalar(3, "int32")), -31, 0);
 
       const dampedState = tf.where(isMomPositive, positiveDamp, negativeDamp);
       const dampedMomentum = tf.where(actualFlipOccurred, dampedState, momentum) as tf.Tensor2D;

@@ -52,7 +52,7 @@ export class DirectionAwareLUTStrategy implements StochasticGateStrategy {
       // 4. Logarithmic Velocity Damper (Stepping back by 3 linear units if flipped)
       const actualFlipOccurred = tf.logicalOr(tf.greater(weightIncrement, 0), tf.greater(weightDecrement, 0));
       const positiveDamp = tf.clipByValue(tf.sub(momentum, tf.scalar(3, "int32")), 0, 31);
-      const negativeDamp = tf.clipByValue(tf.add(momentum, tf.scalar(3, "int32")), -32, 0);
+      const negativeDamp = tf.clipByValue(tf.add(momentum, tf.scalar(3, "int32")), -31, 0);
 
       const dampedState = tf.where(isMomPositive, positiveDamp, negativeDamp);
       const dampedMomentum = tf.where(actualFlipOccurred, dampedState, momentum) as tf.Tensor2D;

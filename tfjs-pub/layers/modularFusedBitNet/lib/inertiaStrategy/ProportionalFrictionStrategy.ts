@@ -58,8 +58,8 @@ export class ProportionalFrictionStrategy implements InertiaUpdateStrategy {
         ),
       );
 
-      // Cast safely back to the 6-bit signed integer register block bounds (-32 to +31)
-      return tf.clipByValue(tf.floor(updatedMomFloat).toInt(), -32, 31) as tf.Tensor2D;
+      // Cast safely back to the 6-bit signed integer register block bounds (-31 to +31)
+      return tf.clipByValue(tf.floor(updatedMomFloat).toInt(), -31, 31) as tf.Tensor2D;
     });
   }
 }

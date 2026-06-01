@@ -6,12 +6,13 @@ import { DynamicSymmetricalCodec } from "./layers/modularFusedBitNet/lib/codec/D
 import { ProportionalCoolingFlywheelStrategy } from "./layers/modularFusedBitNet/lib/inertiaStrategy/ProportionalCoolingFlywheelStrategy";
 import { TernaryStepGateStrategy } from "./layers/modularFusedBitNet/lib/gateStrategy/TernaryStepGateStrategy";
 import { SymmetricalVarianceQuantizer } from "./layers/modularFusedBitNet/lib/quantizer/SymmetricalVarianceQuantizer";
+import { Fused2bW6bMCodec } from "./layers/modularFusedBitNet/lib/codec/Fused2bW6bMCodec";
 
 // --- PRODUCTION 1-MINUTE HIGH-VOLUME BLUEPRINT ---
 const BATCH_SIZE_X = 128; // Standardized continuous batch extraction footprint
-const TOTAL_STEPS = 1200; // Complete runtime horizon pass
+const TOTAL_STEPS = 900; // Complete runtime horizon pass
 const INITIAL_LR = 0.001;
-const GRAD_SCALE = 25.0; // Calibrated kinetic energy scale for real macro manifolds
+const GRAD_SCALE = 20.0; // Calibrated kinetic energy scale for real macro manifolds
 const K = 0.5;
 
 // High-capacity matrix dimensions layout
@@ -19,7 +20,7 @@ const INPUT_DIM = 256;
 const OUTPUT_DIM = 64;
 const TOTAL_SAMPLES = 4000;
 
-async function runMacroAssetConvergenceArena() {
+async function runMacroAssetConvergenceArena(baseFriction: number = 1.0): Promise<number> {
   console.log("=========================================================");
   console.log("LAUNCHING DOWNSAMPLED HARMONIZED DATA ARENA (V5.2 SPEC)  ");
   console.log(`Layer Configuration: Wide [${INPUT_DIM} Inputs] -> [${OUTPUT_DIM} Outputs]`);
@@ -52,12 +53,11 @@ async function runMacroAssetConvergenceArena() {
   const experimentalLayer = new FusedBitNetLayer({
     inFeatures: INPUT_DIM,
     outFeatures: OUTPUT_DIM,
+    initialWeights: sharedRandomWeights,
     gradScale: GRAD_SCALE,
     K,
-    codec: new DynamicSymmetricalCodec(sharedRandomWeights),
-    inertiaStrategy: new ProportionalCoolingFlywheelStrategy(0.75, 1.0, 1.5),
-    gateStrategy: new TernaryStepGateStrategy(),
-    quantizer: new SymmetricalVarianceQuantizer(sharedRandomWeights),
+    codec: new Fused2bW6bMCodec(sharedRandomWeights),
+    inertiaStrategy: new ProportionalCoolingFlywheelStrategy(baseFriction, 1.0, 1.5),
   });
 
   // 2. Instantiate our baseline layer and inject the synchronized starting seed
@@ -70,6 +70,14 @@ async function runMacroAssetConvergenceArena() {
   const expHistory: number[] = [];
   const baseHistory: number[] = [];
   const totalElementsDivisor = BATCH_SIZE_X * OUTPUT_DIM;
+
+  // Generate a held-out test set for evaluating prediction agreement
+  const testSize = 500;
+  const testX = tf.tidy(() => {
+    const rawFeatures = tf.randomUniform([testSize, INPUT_DIM], -2.0, 2.0, "float32");
+    const trendLine = tf.sin(tf.linspace(0, 10, testSize)).reshape([testSize, 1]);
+    return tf.add(rawFeatures, tf.broadcastTo(trendLine, [testSize, INPUT_DIM])) as tf.Tensor2D;
+  });
 
   // FIX: Core batch generator now strictly extracts live data slices from our pre-allocated market tensors!
   const fetchMarketBatch = () => {
@@ -95,13 +103,15 @@ async function runMacroAssetConvergenceArena() {
       const expPreds = experimentalLayer.forward(batchX);
       const expLoss = tf.mean(tf.square(tf.sub(expPreds, batchY)));
       const expGrads = tf.matMul(batchX.transpose(), tf.div(tf.mul(tf.sub(expPreds, batchY), 2.0), tf.scalar(totalElementsDivisor, "float32")));
-      experimentalLayer.applyStep(tf.clipByValue(expGrads, -1.0, 1.0) as tf.Tensor2D, currentLrNormalized);
+      //experimentalLayer.applyStep(tf.clipByValue(expGrads, -1.0, 1.0) as tf.Tensor2D, currentLrNormalized);
+      experimentalLayer.applyStep(tf.clipByValue(expGrads, -2.5, 2.5) as tf.Tensor2D, currentLrNormalized);
 
       // --- 2. BASELINE 12-BYTE SHADOW FLOAT ADAM STEP ---
       const basePreds = baselineLayer.forward(batchX);
       const baseLoss = tf.mean(tf.square(tf.sub(basePreds, batchY)));
       const baseGrads = tf.matMul(batchX.transpose(), tf.div(tf.mul(tf.sub(basePreds, batchY), 2.0), tf.scalar(totalElementsDivisor, "float32")));
-      baselineLayer.applyStep(tf.clipByValue(baseGrads, -1.0, 1.0) as tf.Tensor2D, activeLr);
+      //baselineLayer.applyStep(tf.clipByValue(baseGrads, -1.0, 1.0) as tf.Tensor2D, activeLr);
+      baselineLayer.applyStep(tf.clipByValue(baseGrads, -2.5, 2.5) as tf.Tensor2D, activeLr);
 
       expHistory.push(Number(expLoss.dataSync()));
       baseHistory.push(Number(baseLoss.dataSync()));
@@ -153,6 +163,38 @@ async function runMacroAssetConvergenceArena() {
   console.log(`Final Step Results:`);
   console.log(`  |- Fused BitNet Kinetic Layer (1-Byte)     : ${expHistory[TOTAL_STEPS - 1].toFixed(5)}`);
   console.log(`  |- Quantized Adam Baseline Layer (12-Byte) : ${baseHistory[TOTAL_STEPS - 1].toFixed(5)}`);
+
+  // Compare predictions on held-out test set
+  const predictionAgreement = tf.tidy(() => {
+    const expTestPreds = experimentalLayer.forward(testX);
+    const baseTestPreds = baselineLayer.forward(testX);
+
+    // MSE between predictions
+    const predDiff = tf.square(tf.sub(expTestPreds, baseTestPreds));
+    const mse = tf.mean(predDiff);
+
+    // Correlation: how similar are the outputs?
+    const expMean = tf.mean(expTestPreds);
+    const baseMean = tf.mean(baseTestPreds);
+    const expCentered = tf.sub(expTestPreds, expMean);
+    const baseCentered = tf.sub(baseTestPreds, baseMean);
+
+    const covariance = tf.mean(tf.mul(expCentered, baseCentered));
+    const expStd = tf.sqrt(tf.mean(tf.square(expCentered)));
+    const baseStd = tf.sqrt(tf.mean(tf.square(baseCentered)));
+    const correlation = tf.div(covariance, tf.mul(expStd, baseStd));
+
+    return {
+      mse: Number(mse.dataSync()[0]),
+      correlation: Number(correlation.dataSync()[0]),
+    };
+  });
+
+  testX.dispose();
+
+  console.log(`\nPrediction Agreement Metrics (Test Set):`);
+  console.log(`  |- Prediction MSE (Lower = More Similar)  : ${predictionAgreement.mse.toFixed(6)}`);
+  console.log(`  |- Output Correlation (-1 to 1)           : ${predictionAgreement.correlation.toFixed(4)}`);
   console.log("=========================================================");
 
   experimentalLayer.dispose();
@@ -161,6 +203,25 @@ async function runMacroAssetConvergenceArena() {
   globalX.dispose();
   globalY.dispose();
   trueHiddenLaw.dispose();
+
+  return predictionAgreement.correlation;
 }
 
-runMacroAssetConvergenceArena();
+async function main(baseFrictions: number[] = [0.96]) {
+  const correlations: number[] = [];
+  for (const friction of baseFrictions) {
+    correlations.push(await runMacroAssetConvergenceArena(friction));
+  }
+
+  console.log("\n=========================================================");
+  console.log("BASE FRICTION SENSITIVITY ANALYSIS SUMMARY              ");
+  console.log("=========================================================");
+  baseFrictions.forEach((friction, idx) => {
+    console.log(`Base Friction: ${friction.toFixed(2)} | Output Correlation: ${correlations[idx].toFixed(4)}`);
+  });
+}
+
+//main([1.0, 0.98, 0.96, 0.94, 0.92, 0.9]);
+//main([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+main([1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5]);
+// main();
