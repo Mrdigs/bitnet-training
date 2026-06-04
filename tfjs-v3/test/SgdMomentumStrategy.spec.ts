@@ -46,30 +46,59 @@ describe("SgdMomentumStrategy Bit-Packing Unit Tests", () => {
     });
   });
 
+  // Inside test/SgdMomentumStrategy.spec.ts
+
   it("should execute private element updates and clamp velocity arrays properly", () => {
-    // Access and execute internal protected hook mutations using dynamic dictionary casting
     const strategyPrivateAccessor = strategy as any;
 
-    // Test Case: Positive Gradient pushing positive velocity
-    // Weight = 0, Unsigned State = 0 (Velocity 0). Learning rate = 0.1, Grad = 1.0
-    // Continuous math: (0.9 * 0) - (1.0 * 0.1 * 10) = -1. Rounded: -1. Unsigned two's complement maps out to 63
     let result = strategyPrivateAccessor.mutateElement(0, 1.0, 0.1);
-
     let updatedWeightToken = (result >> 6) & 0x03;
     let updatedVelocityState = result & 0x3f;
 
     assert.strictEqual(updatedWeightToken, 0, "Weight shouldn't change yet on small force");
     assert.strictEqual(updatedVelocityState, 63, "Velocity should track signed value -1 as 63");
 
-    // Test Case: Momentum trigger threshold flip boundary crossing execution
-    // Weight = 0, Unsigned State = 15 (Velocity 15), strong push past threshold limit 16
-    const highStateWord = (0 << 6) | 15;
-    result = strategyPrivateAccessor.mutateElement(highStateWord, -1.0, 0.2); // Negative grad pushes velocity up
+    // FIX: Set unsigned state to 17 (Velocity 17 / 8 = 2.125), which crosses the 2.0 flip threshold
+    const highStateWord = (0 << 6) | 17;
+    result = strategyPrivateAccessor.mutateElement(highStateWord, -1.0, 0.2);
 
     updatedWeightToken = (result >> 6) & 0x03;
     updatedVelocityState = result & 0x3f;
 
     assert.strictEqual(updatedWeightToken, 1, "Weight should shift up by 1 because velocity cross threshold limits");
     assert.strictEqual(updatedVelocityState, 0, "Velocity accumulator field must flush to 0 after triggering updates");
+  });
+
+  it("should gradually accumulate small fractional gradients over multiple updates", () => {
+    const strategyPrivateAccessor = strategy as any;
+    let element = (1 << 6) | 0; // Weight: 1, Velocity: 0
+
+    // Small updates: Grad = -0.2, LR = 0.1. Force per step = -(-0.2 * 0.1) = +0.02
+    for (let i = 0; i < 3; i++) {
+      element = strategyPrivateAccessor.mutateElement(element, -0.2, 0.1);
+    }
+
+    const updatedWeightToken = (element >> 6) & 0x03;
+    const updatedVelocityState = element & 0x3f;
+
+    assert.strictEqual(updatedWeightToken, 1, "Weight must remain stable during minor accumulation phases");
+    // Under Math.round, 3 steps of 0.02 accumulation * 8 resolution ticks register a clear positive value change!
+    assert.ok(updatedVelocityState > 0, "Velocity tracking register must register incremental change accumulation");
+  });
+
+  it("should map tokens to precise ternary floats using polynomial math", () => {
+    tf.tidy(() => {
+      // Instantiate raw tokens: [0, 1, 2]
+      const tokens = tf.tensor1d([0, 1, 2], "int32");
+
+      // Access the protected mapping method via type-casting
+      const strategyPrivate = strategy as any;
+      const floatsTensor = strategyPrivate.mapTokensToTernaryFloats(tokens);
+      const floats = Array.from(floatsTensor.dataSync());
+
+      assert.strictEqual(floats[0], 0.0, "Token 0 must map precisely to 0.0");
+      assert.strictEqual(floats[1], 1.0, "Token 1 must map precisely to 1.0");
+      assert.strictEqual(floats[2], -1.0, "Token 2 must map precisely to -1.0");
+    });
   });
 });

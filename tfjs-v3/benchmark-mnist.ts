@@ -1,14 +1,12 @@
-import mnist from "mnist";
+import * as mnist from "mnist";
 import * as asciichart from "asciichart";
 import * as tf from "@tensorflow/tfjs-node";
 import { BitNetLayer } from "./lib/BitNetLayer";
 import { BitNetOptimizer } from "./lib/BitNetOptimizer";
 import { IBitNetStrategy } from "./lib/IBitNetStrategy";
 
-// 1. Structural strategy factory closure blueprint typing
 export type StrategyFactory = (units: number, inFeatures: number) => IBitNetStrategy;
 
-// 2. Strict candidate parameter interface block grouping
 export interface BenchmarkCandidate {
   label: string;
   factory: StrategyFactory;
@@ -30,14 +28,9 @@ interface TrainingHistory {
   accuracyHistory: number[];
 }
 
-/**
- * Builds a 2-layer sequential BitNet model with identical weight snapshots.
- * Leverages custom weights array initialization for strict baseline replication.
- */
 function buildIsolatedModel(factory: StrategyFactory, hiddenUnits: number, outputUnits: number, wHiddenInit: tf.Tensor2D, wOutputInit: tf.Tensor2D): tf.LayersModel {
   const model = tf.sequential();
 
-  // Hidden Layer
   model.add(
     new BitNetLayer({
       units: hiddenUnits,
@@ -48,7 +41,6 @@ function buildIsolatedModel(factory: StrategyFactory, hiddenUnits: number, outpu
   );
   model.add(tf.layers.activation({ activation: "relu" }));
 
-  // Classification Output Head
   model.add(
     new BitNetLayer({
       units: outputUnits,
@@ -59,7 +51,7 @@ function buildIsolatedModel(factory: StrategyFactory, hiddenUnits: number, outpu
   model.add(tf.layers.activation({ activation: "softmax" }));
 
   model.compile({
-    optimizer: "sgd", // Dummy string to satisfy fit() pipeline requirements
+    optimizer: "sgd",
     loss: "categoricalCrossentropy",
     metrics: ["accuracy"],
   });
@@ -67,70 +59,127 @@ function buildIsolatedModel(factory: StrategyFactory, hiddenUnits: number, outpu
   return model;
 }
 
-/**
- * Executes a custom, mini-batch training loop to inject custom strategy updates.
- */
 function trainCandidate(model: tf.LayersModel, factory: StrategyFactory, images: Float32Array, labels: Uint8Array, batchSize: number, learningRate: number, samplesCount: number): TrainingHistory {
   const history: TrainingHistory = { lossHistory: [], accuracyHistory: [] };
   const inputDim = 784;
 
-  // Spin up two independent optimizer nodes tracking the layers' respective layout configurations
   const hiddenLayerStrategy = factory(128, 784);
   const outputLayerStrategy = factory(10, 128);
-  const bitNetOptimizer = new BitNetOptimizer(hiddenLayerStrategy, learningRate);
+
+  const hiddenLayerOptimizer = new BitNetOptimizer(hiddenLayerStrategy, learningRate);
+  const outputLayerOptimizer = new BitNetOptimizer(outputLayerStrategy, learningRate);
+
+  const bitNetLayers = model.layers.filter((l) => l instanceof BitNetLayer) as BitNetLayer[];
+
+  // --- SAFE NAMING LOOKUP ---
+  // We extract the true registered string names using our public kernelName getter!
+  const hiddenKernelName = bitNetLayers[0].kernelName;
+  const outputKernelName = bitNetLayers[1].kernelName;
+
+  console.log(`   [Debug Naming] Target Hidden Variable Name: "${hiddenKernelName}"`);
+  console.log(`   [Debug Naming] Target Output Variable Name: "${outputKernelName}"`);
+
+  let stepCounter = 0;
 
   for (let startIdx = 0; startIdx < samplesCount; startIdx += batchSize) {
     const endIdx = Math.min(startIdx + batchSize, samplesCount);
     const currentBatchSize = endIdx - startIdx;
+    stepCounter++;
 
     tf.tidy(() => {
-      // Slice raw typed dataset values straight into localized tensor blocks
       const imgSlice = images.subarray(startIdx * inputDim, endIdx * inputDim);
       const lblSlice = labels.subarray(startIdx, endIdx);
 
       const xBatch = tf.tensor2d(imgSlice, [currentBatchSize, inputDim], "float32");
       const yBatch = tf.oneHot(tf.tensor1d(lblSlice, "int32"), 10).toFloat();
 
-      // Explicitly capture loss gradients with respect to structural parameters
       const costGrads = tf.variableGrads(() => {
         const predictions = model.predict(xBatch) as tf.Tensor;
         return tf.losses.softmaxCrossEntropy(yBatch, predictions) as tf.Scalar;
       });
 
-      // Record telemetry evaluations
-      history.lossHistory.push(costGrads.value.dataSync()[0]);
+      const currentLoss = costGrads.value.dataSync()[0];
+      history.lossHistory.push(currentLoss);
 
       const preds = (model.predict(xBatch) as tf.Tensor).argMax(-1);
       const targets = yBatch.argMax(-1);
-      const correct = tf.equal(preds, targets).sum().dataSync()[0];
-      history.accuracyHistory.push(correct / currentBatchSize);
+      const currentAcc = tf.equal(preds, targets).sum().dataSync()[0] / currentBatchSize;
+      history.accuracyHistory.push(currentAcc);
 
-      // Mutate unmanaged variable buffers using custom strategy registers
-      bitNetOptimizer.applyGradients(costGrads.grads);
+      // Extract gradients using our verified public layout names
+      const hiddenGrad = costGrads.grads[hiddenKernelName];
+      const outputGrad = costGrads.grads[outputKernelName];
+
+      if (hiddenGrad) {
+        hiddenLayerOptimizer.applyGradients({ [hiddenKernelName]: hiddenGrad });
+      }
+
+      if (outputGrad) {
+        outputLayerOptimizer.applyGradients({ [outputKernelName]: outputGrad });
+      }
+
+      // Live Telemetry Output Frame
+      if (stepCounter % 4 === 0 || endIdx === samplesCount) {
+        console.log(`   [Batch Step ${String(stepCounter).padStart(2, "0")}] ` + `Processed: ${String(endIdx).padStart(4, "0")}/${samplesCount} | ` + `Loss: ${currentLoss.toFixed(5)} | ` + `Acc: ${(currentAcc * 100).toFixed(2)}%`);
+      }
     });
   }
 
   return history;
 }
 
-/**
- * Universal evaluation harness comparing two strategy configurations side-by-side.
- */
 export function runEvaluationHarness(candidateA: BenchmarkCandidate, candidateB: BenchmarkCandidate): void {
   console.log(`=== 🚀 INITIALIZING BITNET MNIST BENCHMARK HARNESS ===`);
   console.log(`Comparing [A]: ${candidateA.label} vs [B]: ${candidateB.label}\n`);
 
-  // 1. Pull data arrays from the 'mnist' ecosystem with explicit cast
-  const samplesCount = 1000; // Scaled to 1000 for a snappy micro-benchmark verification run
+  const samplesCount = 1000;
   const mnistData = (mnist as any).set(samplesCount, 10) as MnistSet;
 
-  const trainImages = new Float32Array(mnistData.training.reduce((acc: number[], d: MnistSample) => acc.concat(d.input), []));
-  const trainLabels = new Uint8Array(mnistData.training.map((d: MnistSample) => d.output.indexOf(1)));
+  // 1. Extract raw continuous arrays from the package dataset
+  const rawImages = mnistData.training.reduce((acc: number[], d: MnistSample) => acc.concat(d.input), [] as number[]);
+  const rawLabels = mnistData.training.map((d: MnistSample) => d.output.indexOf(1));
 
-  // 2. Generate a fixed random seed weight matrix baseline
+  // 2. Create a randomized shuffling index map array
+  const indices = Array.from({ length: samplesCount }, (_, i) => i);
+
+  // High-velocity Fisher-Yates shuffle algorithm with a localized deterministic seed
+  // to ensure Candidate A and Candidate B receive an IDENTICAL shuffled mapping order
+  let seed = 12345;
+  const randomSeeded = () => {
+    const x = Math.sin(seed++) * 10000;
+    return x - Math.floor(x);
+  };
+
+  for (let i = samplesCount - 1; i > 0; i--) {
+    const j = Math.floor(randomSeeded() * (i + 1));
+    const temp = indices[i];
+    indices[i] = indices[j];
+    indices[j] = temp;
+  }
+
+  // 3. Build uniformly balanced shuffled typed buffers
+  const trainImages = new Float32Array(samplesCount * 784);
+  const trainLabels = new Uint8Array(samplesCount);
+
+  for (let i = 0; i < samplesCount; i++) {
+    const originalIndex = indices[i];
+
+    // Copy the 784 feature pixel layout into place
+    const srcOffset = originalIndex * 784;
+    const destOffset = i * 784;
+    for (let p = 0; p < 784; p++) {
+      trainImages[destOffset + p] = rawImages[srcOffset + p];
+    }
+
+    // Copy the scalar class target label index into place
+    trainLabels[i] = rawLabels[originalIndex];
+  }
+
+  // 4. Generate a fixed random seed weight matrix baseline
   const hiddenUnits = 128;
   const outputUnits = 10;
 
+  // Reset standard deviation back to standard 0.05 scaling bounds now that shuffling is active
   const wHiddenInit = tf.randomNormal([hiddenUnits, 784], 0.0, 0.05, "float32", 42) as tf.Tensor2D;
   const wOutputInit = tf.randomNormal([outputUnits, hiddenUnits], 0.0, 0.05, "float32", 42) as tf.Tensor2D;
 
@@ -156,7 +205,7 @@ export function runEvaluationHarness(candidateA: BenchmarkCandidate, candidateB:
   console.log(`\n=== 📊 COMPARATIVE LOSS CONVERGENCE PROGRESSION ===`);
   console.log(`   (Blue/Upper: ${candidateA.label} | Red/Lower: ${candidateB.label})`);
 
-  const stride = 2;
+  const stride = 1;
   const plotPointsA: number[] = [];
   const plotPointsB: number[] = [];
 
@@ -165,14 +214,13 @@ export function runEvaluationHarness(candidateA: BenchmarkCandidate, candidateB:
     plotPointsB.push(resultsB.lossHistory[i]);
   }
 
-  console.log(
-    asciichart.plot([plotPointsA, plotPointsB], {
-      height: 12,
-      colors: [asciichart.blue, asciichart.red],
-    }),
-  );
+  const chartConfig: any = {
+    height: 14,
+    colors: [asciichart.blue, asciichart.red],
+  };
 
-  // Explicit unmanaged resource memory dump
+  console.log(asciichart.plot([plotPointsA, plotPointsB], chartConfig));
+
   wHiddenInit.dispose();
   wOutputInit.dispose();
 }

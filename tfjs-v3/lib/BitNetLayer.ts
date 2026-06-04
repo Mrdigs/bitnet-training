@@ -68,8 +68,21 @@ export class BitNetLayer extends tf.layers.Layer {
     return outputShape;
   }
 
+  public override getConfig(): tf.serialization.ConfigDict {
+    const baseConfig = super.getConfig();
+    return {
+      ...baseConfig,
+      units: this.config.units,
+      strategy: this.config.strategy as any,
+    };
+  }
+
   public override getWeights(): tf.Tensor[] {
     return [this.kernel.read()];
+  }
+
+  public get kernelName(): string {
+    return this.kernel.name;
   }
 
   static get className(): string {

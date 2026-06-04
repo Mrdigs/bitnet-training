@@ -10,13 +10,8 @@ export class BitNetOptimizer {
     this.learningRate = learningRate;
   }
 
-  /**
-   * Evaluates backward gradients and maps their target updates directly
-   * onto layer allocations via strategy dependency injection.
-   */
   public applyGradients(variableGradients: tf.NamedTensorMap): void {
     tf.tidy(() => {
-      // Query active structural memory addresses tracking our models weights
       const engineVars = tf.engine().registeredVariables as Record<string, tf.Variable>;
 
       for (const name of Object.keys(variableGradients)) {
@@ -26,10 +21,10 @@ export class BitNetOptimizer {
         const currentGrad = variableGradients[name];
         if (!currentGrad) continue;
 
-        // Hand complete control over to the strategy to calculate mutations
+        // Pass the raw live variable and its matching gradient straight to the strategy.
         const updatedContainer = this.strategy.applyGradientUpdate(trueVariableRef, currentGrad, this.learningRate);
 
-        // Commit updates instantly inside the native C++ runtime heap allocation
+        // Commit the updated tensor container cleanly back onto the engine variable memory heap
         trueVariableRef.assign(updatedContainer);
       }
     });

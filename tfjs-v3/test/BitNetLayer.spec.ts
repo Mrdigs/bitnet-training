@@ -64,4 +64,35 @@ describe("BitNetLayer Integration Unit Tests", () => {
       assert.strictEqual(resultsArray[0], 1);
     });
   });
+
+  it("should serialize its configuration properties correctly for framework saving", () => {
+    const mockStrategy = new SgdMomentumStrategy(0.9);
+    const layer = new BitNetLayer({
+      units: 64,
+      strategy: mockStrategy,
+    });
+
+    const config = layer.getConfig();
+
+    assert.strictEqual(config.units, 64, "Serialized configuration dict must retain the units parameter value");
+    assert.deepStrictEqual(config.strategy, mockStrategy, "Serialized configuration dict must preserve the strategy instance reference");
+  });
+
+  it("should correctly infer and extract input features from multi-dimensional shape arrays", () => {
+    tf.tidy(() => {
+      const mockStrategy = new SgdMomentumStrategy(0.9);
+      const layer = new BitNetLayer({
+        units: 10,
+        strategy: mockStrategy,
+      });
+
+      // Pass a 4D tensor shape layout: [Batch size, Height, Width, Channels]
+      // The build framework should evaluate the last index (128) as its inFeatures dimension width
+      layer.build([null, 28, 28, 128]);
+
+      // getPackedShape(10, 128) should allocate: [10, 128 / 4] = [10, 32]
+      const kernelShape = layer.getWeights()[0].shape;
+      assert.deepStrictEqual(kernelShape, [10, 32], "Layer must properly extract trailing channels from high-rank tensors");
+    });
+  });
 });
