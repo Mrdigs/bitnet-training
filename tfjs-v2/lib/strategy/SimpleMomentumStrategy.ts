@@ -74,7 +74,8 @@ export class SimpleMomentumStrategy implements IBitNetStrategy {
       const onesTensor = tf.onesLike(newDiscreteVelocity).toInt();
       const negativeOnesTensor = tf.mul(tf.scalar(-1, "int32"), onesTensor);
 
-      const movementDirection = tf.where(tf.less(newDiscreteVelocity, 0), onesTensor, tf.where(tf.greater(newDiscreteVelocity, 0), negativeOnesTensor, tf.zerosLike(newDiscreteVelocity).toInt()));
+      // const movementDirection = tf.where(tf.less(newDiscreteVelocity, 0), onesTensor, tf.where(tf.greater(newDiscreteVelocity, 0), negativeOnesTensor, tf.zerosLike(newDiscreteVelocity).toInt()));
+      const movementDirection = tf.where(tf.less(newDiscreteVelocity, 0), negativeOnesTensor, tf.where(tf.greater(newDiscreteVelocity, 0), onesTensor, tf.zerosLike(newDiscreteVelocity).toInt()));
 
       const appliedStep = tf.mul(tf.cast(shouldMove, "int32"), movementDirection);
       const proposedWeights = tf.add(tf.cast(currentTernaryWeights, "int32"), appliedStep);

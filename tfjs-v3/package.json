@@ -1,0 +1,22 @@
+{
+  "name": "tfjs-v3",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha --node-option=import=tsx 'test/**/*.spec.ts'"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@tensorflow/tfjs-node": "^4.22.0",
+    "asciichart": "^1.5.25",
+    "mnist": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "mocha": "^11.7.6",
+    "tsx": "^4.22.4"
+  }
+}
