@@ -52,7 +52,9 @@ export class FusedBitNetLayer {
     this.K = config.K ?? 0.5;
 
     this.codec = config.codec ?? new DynamicSymmetricalCodec(config.initialWeights);
-    ((this.quantizer = config.quantizer ?? new SymmetricalVarianceQuantizer(config.initialWeights)), (this.inertiaStrategy = config.inertiaStrategy ?? new ProportionalCoolingFlywheelStrategy(0.75, 1.0, 1.5)), (this.gateStrategy = config.gateStrategy ?? new TernaryStepGateStrategy()));
+    this.quantizer = config.quantizer ?? new SymmetricalVarianceQuantizer(config.initialWeights);
+    this.inertiaStrategy = config.inertiaStrategy ?? new ProportionalCoolingFlywheelStrategy(0.75, 1.0, 1.5);
+    this.gateStrategy = config.gateStrategy ?? new TernaryStepGateStrategy();
 
     // 1. Allocate initial discrete state containers
     this.packedState = this.codec.getInitialState(this.inFeatures, this.outFeatures);
