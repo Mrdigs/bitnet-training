@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
     "typeRoots": ["./node_modules/@types", "./types"]
-  },
-  "include": ["lib/**/*", "test/**/*", "types/**/*.d.ts", "benchmark-mnist.ts", "run-bench.ts"]
+  }
 }
