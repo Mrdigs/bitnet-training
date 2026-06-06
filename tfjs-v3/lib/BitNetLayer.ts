@@ -26,46 +26,22 @@ export class BitNetLayer extends tf.layers.Layer {
     this.activationName = config.activation || "linear";
   }
 
-  /**
-   * Corrected Shape Helper: Safely detects nested shape arrays by
-   * checking if the first inner element is also an array.
-   */
-  private unwrapShape(input: tf.Shape | tf.Shape[]): tf.Shape {
-    if (Array.isArray(input) && input.length > 0 && Array.isArray(input[0])) {
-      return input[0] as tf.Shape; // Extract the first shape from a nested tf.Shape[]
-    }
-    return input as tf.Shape; // It's already a flat tf.Shape ([number, number])
-  }
-
-  /**
-   * Corrected Tensor Helper: Checks if the first element is a true
-   * Tensor instance to safely unwrap a collection.
-   */
-  private unwrapTensor(input: tf.Tensor | tf.Tensor[]): tf.Tensor {
-    if (Array.isArray(input)) {
-      return input[0]; // Extract the first tensor out of the array wrapper
-    }
-    return input; // Return the singular tensor directly
-  }
-
   public override build(inputShape: tf.Shape | tf.Shape[]): void {
-    console.log(`\n=====================================================`);
-    console.log(`[SHAPE DIAGNOSTIC] BUILD LIFECYCLE FOR ${this.name}`);
-    console.log(`=====================================================`);
-    console.log(`  ▸ Raw Incoming inputShape:`, JSON.stringify(inputShape));
+    // 1. Properly detect if the framework is delivering a collection of distinct branch shapes
+    // Check if the first inner item is an array (indicating inputShape is a true tf.Shape[])
+    const isMultiInput = Array.isArray(inputShape) && inputShape.length > 0 && Array.isArray(inputShape[0]);
 
-    const singleShape = this.unwrapShape(inputShape);
-    console.log(`  ▸ Unwrapped Shape Output: `, JSON.stringify(singleShape));
+    // 2. Standardise into a predictable array of shapes so our code handles both paths identically
+    const allInputShapes: tf.Shape[] = isMultiInput ? (inputShape as tf.Shape[]) : [inputShape as tf.Shape];
 
-    const inFeatures = singleShape[singleShape.length - 1];
-    console.log(`  ▸ Extracted inFeatures Value:`, inFeatures);
+    // 3. Extract the feature count of your primary data matrix entry (the first branch)
+    const primaryShape = allInputShapes[0];
+    const inFeatures = primaryShape[primaryShape.length - 1]!;
 
-    const packedShape = this.strategy.getPackedShape(this.units, inFeatures!);
-    console.log(`  ▸ Strategy Requested Packed Weight Shape:`, JSON.stringify(packedShape));
+    // 4. Query your strategy for its custom packing setup dimensions
+    const packedShape = this.strategy.getPackedShape(this.units, inFeatures);
 
     this.kernelVar = this.addWeight("kernel", packedShape, "float32", tf.initializers.glorotUniform({}));
-
-    console.log(`  ▸ Allocated kernelVar True Shape:`, JSON.stringify(this.kernelVar.shape));
 
     this.biasVar = this.addWeight("bias", [this.units], "float32", tf.initializers.zeros());
 
@@ -73,35 +49,61 @@ export class BitNetLayer extends tf.layers.Layer {
   }
 
   public override computeOutputShape(inputShape: tf.Shape | tf.Shape[]): tf.Shape {
-    const singleShape = this.unwrapShape(inputShape);
-    const outputShape = [...singleShape];
+    // 1. Detect if the incoming metadata configuration is multi-input or single-channel
+    const isMultiInput = Array.isArray(inputShape) && inputShape.length > 0 && Array.isArray(inputShape[0]);
+
+    // 2. Extract the primary tensor shape block that drives the matrix multiplication
+    const primaryShape = isMultiInput ? (inputShape as tf.Shape[])[0] : (inputShape as tf.Shape);
+
+    // 3. Clone the primary spatial bounds (preserving dynamic batch tokens like 'null' or batch sizes)
+    const outputShape = [...primaryShape];
+
+    // 4. Mutate ONLY the trailing feature channel axis to match your layer's target units count
     outputShape[outputShape.length - 1] = this.units;
+
     return outputShape;
+  }
+
+  /**
+   * Helper: Normalizes dynamic tensor arguments down to a reliable flat array list.
+   */
+  private normalizeTensors(input: tf.Tensor | tf.Tensor[]): tf.Tensor[] {
+    return Array.isArray(input) ? input : [input];
   }
 
   public override call(inputs: tf.Tensor | tf.Tensor[]): tf.Tensor {
     return tf.tidy(() => {
-      const inputTensor = this.unwrapTensor(inputs);
+      // 1. Safe normalization: Protects parallel inputs instead of throwing them away
+      const allInputTensors = this.normalizeTensors(inputs);
+
+      // 2. Extract the primary driving feature matrix (the first tensor stream)
+      const primaryInputTensor = allInputTensors[0];
+
       const rawPackedWeight = this.kernelVar.read();
       const bias = this.biasVar.read();
 
+      // THE FRAMEWORK SHIELD: Protect the strategy from automatic tape lineage tracking
       const customGradFactory = tf.customGrad((...args: any[]) => {
         const x = args[0] as tf.Tensor;
 
-        // Execute the strategy decoding pass
+        // Execute your strategy's forward decoding calculation (black-box math execution)
         const outputValue = this.strategy.decodeWeights(x);
 
-        const gradFunc = (dy: tf.Tensor) => {
-          return [dy];
-        };
+        // Backward Pass: Hardcoded Straight-Through Estimator array signature
+        const gradFunc = (dy: tf.Tensor) => [dy];
 
         return { value: outputValue, gradFunc };
       });
 
       const executableTernaryWeights = customGradFactory(rawPackedWeight);
-      const matrixProduct = tf.matMul(inputTensor, executableTernaryWeights);
+
+      // Execute matrix multiplication using the unpacked weights
+      const matrixProduct = tf.matMul(primaryInputTensor, executableTernaryWeights);
+
+      // Apply the standard bias offset
       const preActivation = tf.add(matrixProduct, bias);
 
+      // Compute the framework layer activations natively
       if (this.activationName === "relu") {
         return tf.relu(preActivation);
       } else if (this.activationName === "softmax") {
