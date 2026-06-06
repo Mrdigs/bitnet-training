@@ -61,21 +61,20 @@ export class BitNetLayer extends tf.layers.Layer {
       const rawPackedWeight = this.kernelVar.read();
       const bias = this.biasVar.read();
 
-      // THE FRAMEWORK SHIELD: Protect the strategy from automatic tape lineage tracking
       const customGradFactory = tf.customGrad((...args: any[]) => {
         const x = args[0] as tf.Tensor;
 
-        // Strategy Forward Pass: Execute your custom decoding routine (e.g. bitwise array transformations)
+        // Execute the strategy decoding pass
         const outputValue = this.strategy.decodeWeights(x);
 
-        // Backward Pass: Hardcoded Straight-Through Estimator array signature
-        const gradFunc = (dy: tf.Tensor) => [dy];
+        const gradFunc = (dy: tf.Tensor) => {
+          return [dy];
+        };
 
         return { value: outputValue, gradFunc };
       });
 
       const executableTernaryWeights = customGradFactory(rawPackedWeight);
-
       const matrixProduct = tf.matMul(inputTensor, executableTernaryWeights, false, true);
       const preActivation = tf.add(matrixProduct, bias);
 

@@ -21,8 +21,21 @@ export class UncompromisedQatAdamStrategy implements IBitNetStrategy {
   }
 
   public decodeWeights(packedTensor: tf.Tensor): tf.Tensor {
-    const rounded = tf.round(packedTensor);
-    return tf.clipByValue(rounded, -1.0, 1.0);
+    return tf.tidy(() => {
+      // 1. Calculate the dynamic scale (mean of absolute tensor values)
+      // This centers the thresholding box around your current weight distributions
+      const scale = tf.mean(tf.abs(packedTensor));
+
+      // 2. Add a tiny epsilon guard to prevent division-by-zero on flat states
+      const safeScale = tf.add(scale, 1e-9);
+
+      // 3. Scale, round to nearest integer, and clamp hard between -1.0 and 1.0
+      // Values close to 0 will round cleanly to 0.0, creating true ternary sparsity!
+      const scaled = tf.div(packedTensor, safeScale);
+      const rounded = tf.round(scaled);
+
+      return tf.clipByValue(rounded, -1.0, 1.0);
+    });
   }
 
   public computeUpdate(weightVar: tf.Variable, gradient: tf.Tensor, state: OptimizerState): void {
