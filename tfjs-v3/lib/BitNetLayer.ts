@@ -26,22 +26,46 @@ export class BitNetLayer extends tf.layers.Layer {
     this.activationName = config.activation || "linear";
   }
 
+  /**
+   * Corrected Shape Helper: Safely detects nested shape arrays by
+   * checking if the first inner element is also an array.
+   */
   private unwrapShape(input: tf.Shape | tf.Shape[]): tf.Shape {
-    return Array.isArray(input) ? (input as tf.Shape) : (input as tf.Shape);
+    if (Array.isArray(input) && input.length > 0 && Array.isArray(input[0])) {
+      return input[0] as tf.Shape; // Extract the first shape from a nested tf.Shape[]
+    }
+    return input as tf.Shape; // It's already a flat tf.Shape ([number, number])
   }
 
+  /**
+   * Corrected Tensor Helper: Checks if the first element is a true
+   * Tensor instance to safely unwrap a collection.
+   */
   private unwrapTensor(input: tf.Tensor | tf.Tensor[]): tf.Tensor {
-    return Array.isArray(input) ? input[0] : input;
+    if (Array.isArray(input)) {
+      return input[0]; // Extract the first tensor out of the array wrapper
+    }
+    return input; // Return the singular tensor directly
   }
 
   public override build(inputShape: tf.Shape | tf.Shape[]): void {
-    const singleShape = this.unwrapShape(inputShape);
-    const inFeatures = singleShape[singleShape.length - 1]!;
+    console.log(`\n=====================================================`);
+    console.log(`[SHAPE DIAGNOSTIC] BUILD LIFECYCLE FOR ${this.name}`);
+    console.log(`=====================================================`);
+    console.log(`  ▸ Raw Incoming inputShape:`, JSON.stringify(inputShape));
 
-    // Query strategy for its custom packing dimensions [Out, In]
-    const packedShape = this.strategy.getPackedShape(this.units, inFeatures);
+    const singleShape = this.unwrapShape(inputShape);
+    console.log(`  ▸ Unwrapped Shape Output: `, JSON.stringify(singleShape));
+
+    const inFeatures = singleShape[singleShape.length - 1];
+    console.log(`  ▸ Extracted inFeatures Value:`, inFeatures);
+
+    const packedShape = this.strategy.getPackedShape(this.units, inFeatures!);
+    console.log(`  ▸ Strategy Requested Packed Weight Shape:`, JSON.stringify(packedShape));
 
     this.kernelVar = this.addWeight("kernel", packedShape, "float32", tf.initializers.glorotUniform({}));
+
+    console.log(`  ▸ Allocated kernelVar True Shape:`, JSON.stringify(this.kernelVar.shape));
 
     this.biasVar = this.addWeight("bias", [this.units], "float32", tf.initializers.zeros());
 
@@ -75,7 +99,7 @@ export class BitNetLayer extends tf.layers.Layer {
       });
 
       const executableTernaryWeights = customGradFactory(rawPackedWeight);
-      const matrixProduct = tf.matMul(inputTensor, executableTernaryWeights, false, true);
+      const matrixProduct = tf.matMul(inputTensor, executableTernaryWeights);
       const preActivation = tf.add(matrixProduct, bias);
 
       if (this.activationName === "relu") {
