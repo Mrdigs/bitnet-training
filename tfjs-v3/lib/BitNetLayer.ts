@@ -1,93 +1,114 @@
-import * as tf from "@tensorflow/tfjs-node";
+import * as tf from "@tensorflow/tfjs";
 import { IBitNetStrategy } from "./IBitNetStrategy";
 
 export interface BitNetLayerConfig {
   strategy: IBitNetStrategy;
   units: number;
-  inputShape?: tf.Shape;
-  weights?: tf.Tensor[];
+  activation?: "relu" | "softmax" | "linear";
+  inputShape?: tf.Shape; // Satisfies object creation signatures for starting layers
 }
 
 export class BitNetLayer extends tf.layers.Layer {
-  private config: BitNetLayerConfig;
-  declare private kernel: tf.LayerVariable;
+  public static className = "BitNetLayer";
+
+  private strategy: IBitNetStrategy;
+  private units: number;
+  private activationName: "relu" | "softmax" | "linear";
+
+  private kernelVar!: tf.LayerVariable;
+  private biasVar!: tf.LayerVariable;
 
   constructor(config: BitNetLayerConfig) {
-    const { weights, ...baseConfig } = config;
-    super(baseConfig as unknown as tf.serialization.ConfigDict);
-    this.config = config;
+    // Framework pass-through: config captures inputShape natively here
+    super(config as any);
+    this.strategy = config.strategy;
+    this.units = config.units;
+    this.activationName = config.activation || "linear";
+  }
+
+  private unwrapShape(input: tf.Shape | tf.Shape[]): tf.Shape {
+    return Array.isArray(input) ? (input as tf.Shape) : (input as tf.Shape);
+  }
+
+  private unwrapTensor(input: tf.Tensor | tf.Tensor[]): tf.Tensor {
+    return Array.isArray(input) ? input[0] : input;
   }
 
   public override build(inputShape: tf.Shape | tf.Shape[]): void {
-    // Standardize input unwrap: Extract the first flat shape vector cleanly
-    const flatInputShape = (Array.isArray(inputShape[0]) ? inputShape[0] : inputShape) as tf.Shape;
+    const singleShape = this.unwrapShape(inputShape);
+    const inFeatures = singleShape[singleShape.length - 1]!;
 
-    if (!flatInputShape || !Array.isArray(flatInputShape)) {
-      throw new Error("BitNetLayer: Could not determine input shape during build sequence.");
-    }
+    // Query strategy for its custom packing dimensions [Out, In]
+    const packedShape = this.strategy.getPackedShape(this.units, inFeatures);
 
-    const inFeatures = flatInputShape[flatInputShape.length - 1];
-    if (inFeatures === undefined || inFeatures === null) {
-      throw new Error("BitNetLayer requires a known, non-null input feature dimension shape.");
-    }
+    this.kernelVar = this.addWeight("kernel", packedShape, "float32", tf.initializers.glorotUniform({}));
 
-    const containerShape = this.config.strategy.getPackedShape(this.config.units, inFeatures);
-    this.kernel = this.addWeight("kernel", containerShape, "float32", tf.initializers.zeros(), undefined, true);
+    this.biasVar = this.addWeight("bias", [this.units], "float32", tf.initializers.zeros());
 
-    if (this.config.weights && this.config.weights.length > 0) {
-      tf.tidy(() => {
-        const rawInitialMatrix = this.config.weights![0] as tf.Tensor2D;
-        const formattedWeights = this.config.strategy.prepareInitialWeights(rawInitialMatrix);
-        this.kernel.write(formattedWeights);
-      });
-    }
+    this.built = true;
+  }
+
+  public override computeOutputShape(inputShape: tf.Shape | tf.Shape[]): tf.Shape {
+    const singleShape = this.unwrapShape(inputShape);
+    const outputShape = [...singleShape];
+    outputShape[outputShape.length - 1] = this.units;
+    return outputShape;
   }
 
   public override call(inputs: tf.Tensor | tf.Tensor[]): tf.Tensor {
     return tf.tidy(() => {
-      const inputTensor = Array.isArray(inputs) ? inputs[0] : inputs;
-      const rawTensor = this.kernel.read();
-      const ternaryWeights = this.config.strategy.getTernaryWeights(rawTensor);
-      return tf.matMul(inputTensor, ternaryWeights, false, true);
+      const inputTensor = this.unwrapTensor(inputs);
+      const rawPackedWeight = this.kernelVar.read();
+      const bias = this.biasVar.read();
+
+      // THE FRAMEWORK SHIELD: Protect the strategy from automatic tape lineage tracking
+      const customGradFactory = tf.customGrad((...args: any[]) => {
+        const x = args[0] as tf.Tensor;
+
+        // Strategy Forward Pass: Execute your custom decoding routine (e.g. bitwise array transformations)
+        const outputValue = this.strategy.decodeWeights(x);
+
+        // Backward Pass: Hardcoded Straight-Through Estimator array signature
+        const gradFunc = (dy: tf.Tensor) => [dy];
+
+        return { value: outputValue, gradFunc };
+      });
+
+      const executableTernaryWeights = customGradFactory(rawPackedWeight);
+
+      const matrixProduct = tf.matMul(inputTensor, executableTernaryWeights, false, true);
+      const preActivation = tf.add(matrixProduct, bias);
+
+      if (this.activationName === "relu") {
+        return tf.relu(preActivation);
+      } else if (this.activationName === "softmax") {
+        return tf.softmax(preActivation, -1);
+      }
+
+      return preActivation;
     });
   }
 
-  public override computeOutputShape(inputShape: tf.Shape | tf.Shape[]): tf.Shape {
-    // FIX: Match the exact working extraction index structure of the build method
-    // If inputShape is [[null, 784]], this unwraps it perfectly down to a raw iterable array: [null, 784]
-    const flatInputShape = (Array.isArray(inputShape[0]) ? inputShape[0] : inputShape) as tf.Shape;
-
-    if (!flatInputShape || !Array.isArray(flatInputShape)) {
-      throw new Error("BitNetLayer: Invalid inputShape format inside computeOutputShape.");
-    }
-
-    // This spread operation is now guaranteed a flat, standard iterable array of numbers
-    const outputShape = [...flatInputShape];
-    outputShape[outputShape.length - 1] = this.config.units;
-
-    return outputShape;
-  }
-
+  /**
+   * Required for Serialization: Packages configuration states for model saves.
+   */
   public override getConfig(): tf.serialization.ConfigDict {
-    const baseConfig = super.getConfig();
-    return {
-      ...baseConfig,
-      units: this.config.units,
-      strategy: this.config.strategy as any,
-    };
+    // super.getConfig() automatically serializes inputShape, batchInputShape, and names if they exist!
+    const config = super.getConfig();
+    config.units = this.units;
+    config.activation = this.activationName;
+    return config;
   }
 
-  public override getWeights(): tf.Tensor[] {
-    return [this.kernel.read()];
+  /**
+   * Required for Deserialization: Reconstructs the layer instance from a saved configuration dictionary.
+   */
+  public static override fromConfig<T extends tf.serialization.Serializable>(cls: tf.serialization.SerializableConstructor<T>, config: tf.serialization.ConfigDict): T {
+    return new cls(config as any);
   }
 
-  public get kernelName(): string {
-    return this.kernel.name;
-  }
-
-  static get className(): string {
-    return "BitNetLayer";
+  public override getClassName(): string {
+    return BitNetLayer.className;
   }
 }
-
-tf.serialization.registerClass(BitNetLayer);
+tf.serialization.SerializationMap.register(BitNetLayer);

@@ -1,28 +1,22 @@
-import * as tf from "@tensorflow/tfjs-node";
+import * as tf from "@tensorflow/tfjs";
+import { OptimizerState } from "./OptimizerState";
 
 export interface IBitNetStrategy {
   /**
-   * Calculates the exact internal tracking layout shape required
-   * to house the compressed variables.
+   * Informs the model framework what shape it wants the underlying
+   * weight matrix variable container to be inside the layer structure.
    */
-  getPackedShape(outFeatures: number, inFeatures: number): [number, number];
+  getPackedShape(outFeatures: number, inFeatures: number): tf.Shape;
 
   /**
-   * Transforms an initial full-precision [Out, In] floating point matrix
-   * into the strategy's internal packed layout container format.
+   * Decodes your internal storage layout block into high-precision ternary matrices.
    */
-  prepareInitialWeights(rawFloatWeights: tf.Tensor2D): tf.Tensor;
+  decodeWeights(packedTensor: tf.Tensor): tf.Tensor;
 
   /**
-   * Decodes the unified float32 container storage into an uncompressed,
-   * high-precision float32 matrix containing the exact ternary values (-1.0, 0.0, 1.0)
-   * ready for framework mathematical execution.
+   * CLEAN STRATEGY MATH UPDATE
+   * Executes your custom optimization mechanics. Mutates weights via `weightVar.assign()`
+   * and alters tracking variables via the provided state container instance.
    */
-  getTernaryWeights(packedTensor: tf.Tensor): tf.Tensor;
-
-  /**
-   * Accepts the unified float32 layer container and the uncompressed gradients,
-   * handles its own unpacking/repacking mechanics, and returns an updated unified float32 tensor.
-   */
-  applyGradientUpdate(currentPackedContainer: tf.Tensor, gradient: tf.Tensor, learningRate: number): tf.Tensor;
+  computeUpdate(weightVar: tf.Variable, gradient: tf.Tensor, state: OptimizerState): void;
 }
