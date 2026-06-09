@@ -1,5 +1,5 @@
 import * as tf from "@tensorflow/tfjs";
-import { OptimizerState } from "./OptimizerState";
+import { PersistentState } from "./PersistentState";
 
 export interface IBitNetStrategy {
   /**
@@ -14,9 +14,14 @@ export interface IBitNetStrategy {
   decodeWeights(packedTensor: tf.Tensor): tf.Tensor;
 
   /**
-   * CLEAN STRATEGY MATH UPDATE
+   * FORWARD PASS: Receives the layer's dedicated persistent state container.
+   * The strategy can now declare and mutate its own custom normalization scale variables in place.
+   */
+  quantizeActivations(inputs: tf.Tensor, layerState: PersistentState): tf.Tensor;
+
+  /**
    * Executes your custom optimization mechanics. Mutates weights via `weightVar.assign()`
    * and alters tracking variables via the provided state container instance.
    */
-  computeUpdate(weightVar: tf.Variable, gradient: tf.Tensor, state: OptimizerState): void;
+  computeUpdate(weightVar: tf.Variable, gradient: tf.Tensor, optimizerState: PersistentState): void;
 }
