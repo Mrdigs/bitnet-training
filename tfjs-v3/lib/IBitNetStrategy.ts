@@ -3,25 +3,33 @@ import { PersistentState } from "./PersistentState";
 
 export interface IBitNetStrategy {
   /**
-   * Informs the model framework what shape it wants the underlying
-   * weight matrix variable container to be inside the layer structure.
+   * Defines the target layout dimensions for the internal kernel storage matrix.
    */
   getPackedShape(outFeatures: number, inFeatures: number): tf.Shape;
 
   /**
-   * Decodes your internal storage layout block into high-precision ternary matrices.
+   * Transforms raw float baseline initial weights into the strategy's custom configuration layout.
    */
-  decodeWeights(packedTensor: tf.Tensor): tf.Tensor;
+  prepareInitialWeights(rawFloatWeights: tf.Tensor): tf.Tensor;
 
   /**
-   * FORWARD PASS: Receives the layer's dedicated persistent state container.
-   * The strategy can now declare and mutate its own custom normalization scale variables in place.
+   * Straight-Through Estimator forward decoder pass.
+   * Maps packed tracking parameters back to real floating-point tensor dimensions.
    */
-  quantizeActivations(inputs: tf.Tensor, layerState: PersistentState): tf.Tensor;
+  decodeWeights(packedTensor: tf.Tensor, state: PersistentState): tf.Tensor;
 
   /**
-   * Executes your custom optimization mechanics. Mutates weights via `weightVar.assign()`
-   * and alters tracking variables via the provided state container instance.
+   * Quantization phase for input activations.
    */
-  computeUpdate(weightVar: tf.Variable, gradient: tf.Tensor, optimizerState: PersistentState): void;
+  quantizeActivations(inputs: tf.Tensor, state: PersistentState): tf.Tensor;
+
+  /**
+   * Universal dequantization hook executed after matrix multiplication to restore feature variance.
+   */
+  dequantizeOutputs(rawOutputs: tf.Tensor, state: PersistentState): tf.Tensor;
+
+  /**
+   * Custom out-of-bounds weight state optimization step.
+   */
+  computeUpdate(weightVar: tf.Variable, gradient: tf.Tensor, state: PersistentState): void;
 }

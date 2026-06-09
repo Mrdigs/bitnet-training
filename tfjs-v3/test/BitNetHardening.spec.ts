@@ -1,8 +1,8 @@
 import * as assert from "assert";
 import * as tf from "@tensorflow/tfjs-node";
 import { SgdMomentumStrategy } from "../lib/strategies/SgdMomentumStrategy";
-import { BitNetOptimizer } from "../lib/BitNetOptimizer";
-import { BitNetLayer } from "../lib/BitNetLayer";
+import { StrategyBitNetOptimizer } from "../lib/StrategyBitNetOptimizer";
+import { StrategyBitNetLayer } from "../lib/StrategyBitNetLayer";
 
 describe("BitNet Architecture Hardening & Stress Tests", () => {
   let strategy: SgdMomentumStrategy;
@@ -65,7 +65,7 @@ describe("BitNet Architecture Hardening & Stress Tests", () => {
       const initialMemory = tf.memory();
 
       // Instantiate our runtime components
-      const optimizer = new BitNetOptimizer(strategy, 0.01);
+      const optimizer = new StrategyBitNetOptimizer(strategy, 0.01);
       const packedContainer = tf.variable(tf.zeros([units, inFeatures / 4], "float32"));
       const gradientMock = tf.randomNormal([units, inFeatures]);
 
@@ -101,7 +101,7 @@ describe("BitNet Architecture Hardening & Stress Tests", () => {
   // =========================================================================
   describe("Optimization Continuity & Edge Case Safety", () => {
     it("should keep weights and velocity states completely frozen when receiving a dead zero gradient", () => {
-      const optimizer = new BitNetOptimizer(strategy, 0.05);
+      const optimizer = new StrategyBitNetOptimizer(strategy, 0.05);
 
       // Establish an explicit baseline variable layout configuration
       const initialWeights = tf.randomUniform([units, inFeatures], -1, 1) as tf.Tensor2D;
@@ -130,7 +130,7 @@ describe("BitNet Architecture Hardening & Stress Tests", () => {
     it("should correctly handle forward call operations under dynamic batch sizing variations", () => {
       tf.tidy(() => {
         const initialWeightsMatrix = tf.zeros([units, inFeatures]) as tf.Tensor2D;
-        const layer = new BitNetLayer({
+        const layer = new StrategyBitNetLayer({
           units: units,
           strategy: strategy,
           weights: [initialWeightsMatrix],

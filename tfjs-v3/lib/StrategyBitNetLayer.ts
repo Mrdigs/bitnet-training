@@ -2,7 +2,7 @@ import * as tf from "@tensorflow/tfjs";
 import { IBitNetStrategy } from "./IBitNetStrategy";
 import { PersistentState } from "./PersistentState";
 
-export interface BitNetLayerConfig {
+export interface StrategyBitNetLayerConfig {
   strategy: IBitNetStrategy;
   units: number;
   activation?: "relu" | "softmax" | "linear";
@@ -12,121 +12,133 @@ export interface BitNetLayerConfig {
 export class StrategyBitNetLayer extends tf.layers.Layer {
   public static className = "StrategyBitNetLayer";
 
-  private strategy: IBitNetStrategy;
-  private units: number;
-  private activationName: "relu" | "softmax" | "linear";
+  private readonly units: number;
+  private readonly strategy: IBitNetStrategy;
+  private readonly activationType: "relu" | "softmax" | "linear";
 
   private kernelVar!: tf.LayerVariable;
+  private layerState!: PersistentState;
 
-  private layerState = new PersistentState();
-
-  constructor(config: BitNetLayerConfig) {
-    // Framework pass-through: config captures inputShape natively here
+  constructor(config: StrategyBitNetLayerConfig) {
     super(config as any);
-    this.strategy = config.strategy;
     this.units = config.units;
-    this.activationName = config.activation || "linear";
+    this.strategy = config.strategy;
+    this.activationType = config.activation ?? "linear";
+    this.layerState = new PersistentState();
+    this.supportsMasking = true;
   }
 
   public override build(inputShape: tf.Shape | tf.Shape[]): void {
-    // 1. Properly detect if the framework is delivering a collection of distinct branch shapes
-    // Check if the first inner item is an array (indicating inputShape is a true tf.Shape[])
-    const isMultiInput = Array.isArray(inputShape) && inputShape.length > 0 && Array.isArray(inputShape[0]);
+    let shape: number[];
 
-    // 2. Standardise into a predictable array of shapes so our code handles both paths identically
-    const allInputShapes: tf.Shape[] = isMultiInput ? (inputShape as tf.Shape[]) : [inputShape as tf.Shape];
+    if (Array.isArray(inputShape[0])) {
+      const shapes = inputShape as number[][];
+      if (shapes.length !== 1) {
+        throw new Error(`BitLinear expects exactly one input shape, got ${shapes.length}`);
+      }
+      shape = shapes[0];
+    } else {
+      shape = inputShape as number[];
+    }
 
-    // 3. Extract the feature count of your primary data matrix entry (the first branch)
-    const primaryShape = allInputShapes[0];
-    const inFeatures = primaryShape[primaryShape.length - 1]!;
+    const inputDim = shape[shape.length - 1];
+    if (inputDim === undefined || inputDim === null) {
+      throw new Error("StrategyBitNetLayer requires a known input dimension.");
+    }
 
-    // 4. Query your strategy for its custom packing setup dimensions
-    const packedShape = this.strategy.getPackedShape(this.units, inFeatures);
+    const packedShape = this.strategy.getPackedShape(this.units, inputDim);
 
-    this.kernelVar = this.addWeight("kernel", packedShape, "float32", tf.initializers.glorotUniform({}));
+    this.kernelVar = this.addWeight(
+      "kernel",
+      packedShape,
+      "float32", // Statically enforced to preserve framework autodiff trainability pipelines
+      tf.initializers.zeros(),
+    );
+
+    // 2. Wrap initialization logic inside tidy to prevent memory accumulation on the GPU texture tape
+    tf.tidy(() => {
+      // 3. Generate high-fidelity standard Glorot Uniform weights matching uncompressed [in, out] dimensions
+      const floatInitializer = tf.initializers.glorotUniform({});
+      const baseFloatWeights = floatInitializer.apply([inputDim, this.units], "float32");
+
+      // 4. Transform the floating-point initialization values into the strategy's target configuration
+      const transformedInitialWeights = this.strategy.prepareInitialWeights(baseFloatWeights);
+
+      // 5. Commit an atomic assignment operation to push the packed parameter configuration directly to the GPU
+      // Read out the target underlying variable reference and force mutate it.
+      (this.kernelVar as any).write(transformedInitialWeights);
+    });
 
     this.built = true;
   }
 
+  public override call(inputs: tf.Tensor | tf.Tensor[]): tf.Tensor {
+    return tf.tidy(() => {
+      // 1. Input Parsing
+      let x: tf.Tensor;
+      if (Array.isArray(inputs)) {
+        if (inputs.length !== 1) {
+          throw new Error(`BitLinear expects exactly one input tensor, got ${inputs.length}`);
+        }
+        x = inputs[0];
+      } else {
+        x = inputs;
+      }
+      const rawPackedWeight = this.kernelVar.read();
+
+      // 1. Transform active input activations via strategy
+      const processedInputs = this.strategy.quantizeActivations(x, this.layerState);
+
+      // 2. Straight-Through Estimator weight decoder mapping hook
+      const customGradFactory = tf.customGrad((...args: any[]) => {
+        const wIn = args[0] as tf.Tensor;
+        const decoded = this.strategy.decodeWeights(wIn, this.layerState);
+        return {
+          value: decoded,
+          gradFunc: (dy: tf.Tensor) => [dy],
+        };
+      });
+      const executableWeights = customGradFactory(rawPackedWeight);
+
+      // 3. Perform integer domain Matrix Multiplication
+      const matMulOutputs = tf.matMul(processedInputs, executableWeights);
+
+      // 4. Rescale output metrics via strategy dequantization pass
+      const preActivation = this.strategy.dequantizeOutputs(matMulOutputs, this.layerState);
+
+      // 5. Post-layer dynamic activation routing
+      if (this.activationType === "relu") {
+        return tf.relu(preActivation);
+      } else if (this.activationType === "softmax") {
+        return tf.softmax(preActivation, -1);
+      }
+      return preActivation;
+    });
+  }
+
   public override computeOutputShape(inputShape: tf.Shape | tf.Shape[]): tf.Shape {
-    // 1. Detect if the incoming metadata configuration is multi-input or single-channel
-    const isMultiInput = Array.isArray(inputShape) && inputShape.length > 0 && Array.isArray(inputShape[0]);
+    let shape: number[];
 
-    // 2. Extract the primary tensor shape block that drives the matrix multiplication
-    const primaryShape = isMultiInput ? (inputShape as tf.Shape[])[0] : (inputShape as tf.Shape);
+    if (Array.isArray(inputShape[0])) {
+      const shapes = inputShape as number[][];
+      shape = shapes[0];
+    } else {
+      shape = inputShape as number[];
+    }
 
-    // 3. Clone the primary spatial bounds (preserving dynamic batch tokens like 'null' or batch sizes)
-    const outputShape = [...primaryShape];
-
-    // 4. Mutate ONLY the trailing feature channel axis to match your layer's target units count
+    const outputShape = [...shape];
     outputShape[outputShape.length - 1] = this.units;
 
     return outputShape;
   }
 
-  /**
-   * Helper: Normalizes dynamic tensor arguments down to a reliable flat array list.
-   */
-  private normalizeTensors(input: tf.Tensor | tf.Tensor[]): tf.Tensor[] {
-    return Array.isArray(input) ? input : [input];
-  }
-
-  public override call(inputs: tf.Tensor | tf.Tensor[]): tf.Tensor {
-    return tf.tidy(() => {
-      // 1. Safe normalization: Protects parallel inputs instead of throwing them away
-      const allInputTensors = this.normalizeTensors(inputs);
-
-      // 2. Extract the primary driving feature matrix (the first tensor stream)
-      const primaryInputTensor = allInputTensors[0];
-
-      const rawPackedWeight = this.kernelVar.read();
-
-      // 1. Pass the layer's dedicated memory state straight to your strategy activation step
-      const quantizedInputs = this.strategy.quantizeActivations(primaryInputTensor, this.layerState);
-
-      // 2. Protect weight matrix tape boundaries
-      const customGradFactory = tf.customGrad((...args: any[]) => {
-        const x = args[0] as tf.Tensor;
-        const outputValue = this.strategy.decodeWeights(x);
-        const gradFunc = (dy: tf.Tensor) => [dy];
-        return { value: outputValue, gradFunc };
-      });
-
-      const executableTernaryWeights = customGradFactory(rawPackedWeight);
-
-      // 3. Forward pass matrix multiplication execution
-      const preActivation = tf.matMul(quantizedInputs, executableTernaryWeights);
-
-      if (this.activationName === "relu") {
-        return tf.relu(preActivation);
-      } else if (this.activationName === "softmax") {
-        return tf.softmax(preActivation, -1);
-      }
-
-      return preActivation;
-    });
-  }
-
-  /**
-   * Required for Serialization: Packages configuration states for model saves.
-   */
   public override getConfig(): tf.serialization.ConfigDict {
-    // super.getConfig() automatically serializes inputShape, batchInputShape, and names if they exist!
-    const config = super.getConfig();
-    config.units = this.units;
-    config.activation = this.activationName;
-    return config;
-  }
-
-  /**
-   * Required for Deserialization: Reconstructs the layer instance from a saved configuration dictionary.
-   */
-  public static override fromConfig<T extends tf.serialization.Serializable>(cls: tf.serialization.SerializableConstructor<T>, config: tf.serialization.ConfigDict): T {
-    return new cls(config as any);
-  }
-
-  public override getClassName(): string {
-    return StrategyBitNetLayer.className;
+    return {
+      ...super.getConfig(),
+      units: this.units,
+      activation: this.activationType,
+    };
   }
 }
-tf.serialization.SerializationMap.register(StrategyBitNetLayer);
+
+tf.serialization.registerClass(StrategyBitNetLayer);

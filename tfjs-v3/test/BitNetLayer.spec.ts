@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as tf from "@tensorflow/tfjs-node";
-import { BitNetLayer } from "../lib/BitNetLayer";
+import { StrategyBitNetLayer } from "../lib/StrategyBitNetLayer";
 import { SgdMomentumStrategy } from "../lib/strategies/SgdMomentumStrategy";
 
 describe("BitNetLayer Integration Unit Tests", () => {
@@ -9,7 +9,7 @@ describe("BitNetLayer Integration Unit Tests", () => {
       const mockStrategy = new SgdMomentumStrategy(0.9);
       const initialWeightsMatrix = tf.zeros([32, 784]) as tf.Tensor2D;
 
-      const layer = new BitNetLayer({
+      const layer = new StrategyBitNetLayer({
         units: 32,
         inputShape: [784],
         strategy: mockStrategy,
@@ -37,7 +37,7 @@ describe("BitNetLayer Integration Unit Tests", () => {
         [2, 4],
       );
 
-      const layer = new BitNetLayer({
+      const layer = new StrategyBitNetLayer({
         units: 2,
         inputShape: [4],
         strategy: mockStrategy,
@@ -67,7 +67,7 @@ describe("BitNetLayer Integration Unit Tests", () => {
 
   it("should serialize its configuration properties correctly for framework saving", () => {
     const mockStrategy = new SgdMomentumStrategy(0.9);
-    const layer = new BitNetLayer({
+    const layer = new StrategyBitNetLayer({
       units: 64,
       strategy: mockStrategy,
     });
@@ -81,7 +81,7 @@ describe("BitNetLayer Integration Unit Tests", () => {
   it("should correctly infer and extract input features from multi-dimensional shape arrays", () => {
     tf.tidy(() => {
       const mockStrategy = new SgdMomentumStrategy(0.9);
-      const layer = new BitNetLayer({
+      const layer = new StrategyBitNetLayer({
         units: 10,
         strategy: mockStrategy,
       });

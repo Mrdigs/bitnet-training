@@ -1,6 +1,6 @@
 import * as tf from "@tensorflow/tfjs-node";
-import { BitNetLayer } from "./lib/BitNetLayer";
-import { BitNetOptimizer } from "./lib/BitNetOptimizer";
+import { StrategyBitNetLayer } from "./lib/StrategyBitNetLayer";
+import { StrategyBitNetOptimizer } from "./lib/StrategyBitNetOptimizer";
 import { SgdMomentumStrategy } from "./lib/strategies/SgdMomentumStrategy";
 
 async function runMinimalFitTest(): Promise<void> {
@@ -18,7 +18,7 @@ async function runMinimalFitTest(): Promise<void> {
   const model = tf.sequential();
 
   model.add(
-    new BitNetLayer({
+    new StrategyBitNetLayer({
       units: units,
       inputShape: [inputDim],
       strategy: momentumStrategy,
@@ -31,7 +31,7 @@ async function runMinimalFitTest(): Promise<void> {
   model.add(tf.layers.dense({ units: 10, activation: "softmax" }));
 
   // 4. Instantiate our custom BitNetOptimizer, configured with a distinct learning rate
-  const bitNetOptimizer = new BitNetOptimizer(momentumStrategy, 0.01);
+  const bitNetOptimizer = new StrategyBitNetOptimizer(momentumStrategy, 0.01);
 
   // Compile the model using standard metrics, passing a dummy placeholder string for the optimizer
   // because we will intercept and handle the gradient mutations manually via the callback mechanism

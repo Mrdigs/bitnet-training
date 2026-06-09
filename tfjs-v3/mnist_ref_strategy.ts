@@ -1,10 +1,9 @@
 import * as tf from "@tensorflow/tfjs-node";
 import mnist, { MnistSample } from "mnist";
-import { CustomBasicOptimizer } from "./lib/CustomBasicOptimizer";
-import { CustomBasicDenseLayer } from "./lib/CustomBasicLayer";
-import { BitNetLayer } from "./lib/BitNetLayer";
-import { UncompromisedQatAdamStrategy } from "./lib/strategies/UncompromisedQatAdamStrategy";
-import { BitNetOptimizer } from "./lib/BitNetOptimizer";
+import { ReferenceBitNetLayer } from "./lib/ReferenceBitNetLayer";
+import { ReferenceBitNetStrategy } from "./lib/strategy/ReferenceBitNetStrategy";
+import { StrategyBitNetLayer } from "./lib/StrategyBitNetLayer";
+import { StrategyBitNetOptimizer } from "./lib/StrategyBitNetOptimizer";
 
 interface TensorDataPayload {
   xs: tf.Tensor2D;
@@ -37,30 +36,31 @@ const testData: TensorDataPayload = convertToTensors(mnistData.test);
 console.log("Building the model architecture...");
 const model: tf.Sequential = tf.sequential();
 
-const strategy = new UncompromisedQatAdamStrategy();
+const strategy = new ReferenceBitNetStrategy();
+const optimizer = new StrategyBitNetOptimizer(strategy);
 
 // Input hidden layer: 784 inputs -> 128 hidden units with ReLU activation
 model.add(
-  new BitNetLayer({
+  new StrategyBitNetLayer({
+    strategy,
     inputShape: [784],
     units: 128,
     activation: "relu",
-    strategy,
   }),
 );
 
 // Output layer: 10 units with Softmax for classification probabilities
 model.add(
-  new BitNetLayer({
+  new StrategyBitNetLayer({
+    strategy,
     units: 10,
     activation: "softmax",
-    strategy,
   }),
 );
 
 // 3. Compile the Model
 model.compile({
-  optimizer: new BitNetOptimizer(strategy),
+  optimizer,
   loss: "categoricalCrossentropy",
   metrics: ["accuracy"],
 });
