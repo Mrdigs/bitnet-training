@@ -1,14 +1,17 @@
 import * as tf from "@tensorflow/tfjs";
 import { IBitNetStrategy } from "./IBitNetStrategy";
+import { ILearningRate } from "./LearningRate";
 
 export class StrategyBitNetOptimizer extends tf.Optimizer {
   public static className = "StrategyBitNetOptimizer";
 
   private strategy: IBitNetStrategy;
+  private learningRate: ILearningRate;
 
-  constructor(strategy: IBitNetStrategy) {
+  constructor(strategy: IBitNetStrategy, learningRate: ILearningRate) {
     super();
     this.strategy = strategy;
+    this.learningRate = learningRate;
   }
 
   public override applyGradients(variableGradientsMap: any[]): void {
@@ -32,6 +35,8 @@ export class StrategyBitNetOptimizer extends tf.Optimizer {
           liveWeightVar.assign(liveWeightVar.sub(delta));
         }
       }
+
+      this.learningRate.incrementStep();
     });
   }
 

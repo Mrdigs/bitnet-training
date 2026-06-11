@@ -96,13 +96,14 @@ export class FusedStochasticBitNetStrategy extends PackedBitNetStrategy implemen
     return rescaled;
   }
 
-  public computeUpdate(rawWeight: tf.Tensor, gradient: tf.Tensor, state: PersistentState): tf.Tensor {
+  public computeUpdate(rawWeight: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor {
     return tf.tidy(() => {
       // FIXED: Remove .read(), treat weightVar directly as a tensor reference
       const fused = rawWeight as tf.Tensor2D;
       const fullGrads = gradient as tf.Tensor2D;
       const [packedRows, outFeatures] = fused.shape;
 
+      // TODO: This ought to come from the argument
       const currentLrTensor = state.getOrCreate("lr", () => tf.scalar(0.001, "float32"));
       const scale_t = 1.0 + this.K * (1.0 - currentLrTensor.dataSync()[0]);
 

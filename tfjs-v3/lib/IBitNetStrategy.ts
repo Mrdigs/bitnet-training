@@ -31,7 +31,7 @@ export interface IBitNetStrategy {
   /**
    * Custom out-of-bounds weight state optimization step.
    */
-  computeUpdate(packedTensor: tf.Tensor, gradients: tf.Tensor, state: PersistentState): tf.Tensor;
+  computeUpdate(packedTensor: tf.Tensor, gradients: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor;
 
   /**
    * Apply the update to the weights, called by the optimizer

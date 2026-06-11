@@ -39,12 +39,10 @@ const testData: TensorDataPayload = convertToTensors(mnistData.test);
 console.log("Building the model architecture...");
 const model: tf.Sequential = tf.sequential();
 
-//const strategy = new ReferenceBitNetStrategy();
-const strategy = new FusedStochasticBitNetStrategy();
-const optimizer = new StrategyBitNetOptimizer(strategy);
-
-// TODO This is from reference strategy, and currently isn't passed in
+const strategy = new ReferenceBitNetStrategy();
+//const strategy = new FusedStochasticBitNetStrategy();
 const learningRate = new LearningRate((step: number) => 0.001);
+const optimizer = new StrategyBitNetOptimizer(strategy, learningRate);
 
 // Input hidden layer: 784 inputs -> 128 hidden units with ReLU activation
 model.add(

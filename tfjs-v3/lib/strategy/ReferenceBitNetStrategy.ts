@@ -77,8 +77,7 @@ export class ReferenceBitNetStrategy implements IBitNetStrategy {
     return rescaled;
   }
 
-  public computeUpdate(weight: tf.Tensor, gradient: tf.Tensor, state: PersistentState): tf.Tensor {
-    const learningRate = 0.001;
+  public computeUpdate(weight: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor {
     const beta1 = 0.9;
     const beta2 = 0.999;
     const eps = 1e-8;

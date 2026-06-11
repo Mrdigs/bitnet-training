@@ -4,7 +4,7 @@ export interface ILearningRate {
 }
 
 export class LearningRate {
-  private currentStep: number = 0;
+  private currentStep: number = 1;
   private schedulerFunc: (step: number) => number;
 
   /**
