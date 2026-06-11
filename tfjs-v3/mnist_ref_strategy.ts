@@ -4,6 +4,9 @@ import { ReferenceBitNetLayer } from "./lib/ReferenceBitNetLayer";
 import { ReferenceBitNetStrategy } from "./lib/strategy/ReferenceBitNetStrategy";
 import { StrategyBitNetLayer } from "./lib/StrategyBitNetLayer";
 import { StrategyBitNetOptimizer } from "./lib/StrategyBitNetOptimizer";
+import { FusedStochasticBitNetStrategy } from "./lib/strategy/FusedStochasticBitNetStrategy";
+import { LearningRate } from "./lib/LearningRate";
+import { TrainingMonitorCallback } from "./lib/TrainingMonitorCallback";
 
 interface TensorDataPayload {
   xs: tf.Tensor2D;
@@ -36,13 +39,18 @@ const testData: TensorDataPayload = convertToTensors(mnistData.test);
 console.log("Building the model architecture...");
 const model: tf.Sequential = tf.sequential();
 
-const strategy = new ReferenceBitNetStrategy();
+//const strategy = new ReferenceBitNetStrategy();
+const strategy = new FusedStochasticBitNetStrategy();
 const optimizer = new StrategyBitNetOptimizer(strategy);
+
+// TODO This is from reference strategy, and currently isn't passed in
+const learningRate = new LearningRate((step: number) => 0.001);
 
 // Input hidden layer: 784 inputs -> 128 hidden units with ReLU activation
 model.add(
   new StrategyBitNetLayer({
     strategy,
+    learningRate,
     inputShape: [784],
     units: 128,
     activation: "relu",
@@ -53,6 +61,7 @@ model.add(
 model.add(
   new StrategyBitNetLayer({
     strategy,
+    learningRate,
     units: 10,
     activation: "softmax",
   }),
@@ -73,18 +82,7 @@ async function runTraining(): Promise<void> {
     epochs: 5,
     batchSize: 64,
     validationData: [testData.xs, testData.ys],
-    callbacks: {
-      onEpochEnd: async (epoch: number, logs?: tf.Logs) => {
-        if (logs) {
-          // Fallbacks added because keys can vary slightly depending on the environment configuration
-          const loss = logs.loss ?? 0;
-          const acc = logs.acc ?? logs.accuracy ?? 0;
-          const valAcc = logs.val_acc ?? logs.val_accuracy ?? 0;
-
-          console.log(`Epoch ${epoch + 1}: Loss = ${loss.toFixed(4)}, Accuracy = ${acc.toFixed(4)}, Val Accuracy = ${valAcc.toFixed(4)}`);
-        }
-      },
-    },
+    callbacks: [new TrainingMonitorCallback()],
   });
 
   console.log("\nTraining complete!");

@@ -1,9 +1,11 @@
 import * as tf from "@tensorflow/tfjs";
 import { IBitNetStrategy } from "./IBitNetStrategy";
 import { PersistentState } from "./PersistentState";
+import { ILearningRate } from "./LearningRate";
 
 export interface StrategyBitNetLayerConfig {
   strategy: IBitNetStrategy;
+  learningRate: ILearningRate;
   units: number;
   activation?: "relu" | "softmax" | "linear";
   inputShape?: tf.Shape; // Satisfies object creation signatures for starting layers
@@ -13,19 +15,22 @@ export class StrategyBitNetLayer extends tf.layers.Layer {
   public static className = "StrategyBitNetLayer";
 
   private readonly units: number;
-  private readonly strategy: IBitNetStrategy;
   private readonly activationType: "relu" | "softmax" | "linear";
 
+  private readonly strategy: IBitNetStrategy;
+  private readonly learningRate: ILearningRate;
+  private readonly layerState: PersistentState;
+
   private kernelVar!: tf.LayerVariable;
-  private layerState!: PersistentState;
 
   constructor(config: StrategyBitNetLayerConfig) {
     super(config as any);
     this.units = config.units;
     this.strategy = config.strategy;
     this.activationType = config.activation ?? "linear";
+    this.learningRate = config.learningRate;
     this.layerState = new PersistentState();
-    this.supportsMasking = true;
+    // this.supportsMasking = true;
   }
 
   public override build(inputShape: tf.Shape | tf.Shape[]): void {
@@ -78,7 +83,7 @@ export class StrategyBitNetLayer extends tf.layers.Layer {
       let x: tf.Tensor;
       if (Array.isArray(inputs)) {
         if (inputs.length !== 1) {
-          throw new Error(`BitLinear expects exactly one input tensor, got ${inputs.length}`);
+          throw new Error(`Layer expects exactly one input tensor, got ${inputs.length}`);
         }
         x = inputs[0];
       } else {
@@ -95,7 +100,11 @@ export class StrategyBitNetLayer extends tf.layers.Layer {
         const decoded = this.strategy.decodeWeights(wIn, this.layerState);
         return {
           value: decoded,
-          gradFunc: (dy: tf.Tensor) => [dy],
+          gradFunc: (dy: tf.Tensor) => {
+            return tf.tidy(() => {
+              return this.strategy.computeUpdate(rawPackedWeight, dy, this.layerState);
+            });
+          },
         };
       });
       const executableWeights = customGradFactory(rawPackedWeight);

@@ -77,14 +77,14 @@ export class ReferenceBitNetStrategy implements IBitNetStrategy {
     return rescaled;
   }
 
-  public computeUpdate(weightVar: tf.Variable, gradient: tf.Tensor, state: PersistentState): void {
+  public computeUpdate(weight: tf.Tensor, gradient: tf.Tensor, state: PersistentState): tf.Tensor {
     const learningRate = 0.001;
     const beta1 = 0.9;
     const beta2 = 0.999;
     const eps = 1e-8;
 
-    const firstMoment = state.getOrCreate("m", () => tf.zerosLike(weightVar));
-    const secondMoment = state.getOrCreate("v", () => tf.zerosLike(weightVar));
+    const firstMoment = state.getOrCreate("m", () => tf.zerosLike(weight));
+    const secondMoment = state.getOrCreate("v", () => tf.zerosLike(weight));
     const stepCounter = state.getOrCreate("t", () => tf.scalar(0));
 
     const nextStep = tf.add(stepCounter, tf.scalar(1));
@@ -95,11 +95,16 @@ export class ReferenceBitNetStrategy implements IBitNetStrategy {
     const vHat = tf.div(nextV, tf.sub(tf.scalar(1), tf.pow(tf.scalar(beta2), nextStep)));
 
     const updateDelta = tf.div(mHat, tf.add(tf.sqrt(vHat), tf.scalar(eps)));
-    const nextWeight = tf.sub(weightVar, tf.mul(updateDelta, tf.scalar(learningRate)));
+    const nextWeight = tf.sub(weight, tf.mul(updateDelta, tf.scalar(learningRate)));
 
-    weightVar.assign(nextWeight);
     state.set("m", nextM);
     state.set("v", nextV);
     state.set("t", nextStep);
+
+    return nextWeight;
+  }
+
+  public applyUpdate(weightVar: tf.Variable, update: tf.Tensor): void {
+    weightVar.assign(update);
   }
 }
