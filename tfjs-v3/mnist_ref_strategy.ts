@@ -5,6 +5,9 @@ import { StrategyBitNetLayer } from "./lib/StrategyBitNetLayer";
 import { StrategyBitNetOptimizer } from "./lib/StrategyBitNetOptimizer";
 import { LearningRate } from "./lib/LearningRate";
 import { TrainingMonitorCallback } from "./lib/TrainingMonitorCallback";
+import { StochasticBitNetStrategy } from "./lib/strategy/StochasticBitNetStrategy";
+import { TerminalChartCallback } from "./lib/TerminalChartCallback";
+import { FirstPassLossCallback } from "./lib/FirstPassLossCallback";
 
 interface TensorDataPayload {
   xs: tf.Tensor2D;
@@ -37,13 +40,19 @@ const testData: TensorDataPayload = convertToTensors(mnistData.test);
 console.log("Building the model architecture...");
 const model: tf.Sequential = tf.sequential();
 
-// const strategy = new StochasticBitNetStrategy();
-const strategy = new ReferenceBitNetStrategy();
-//const strategy = new FlatFusedBitNetStrategy();
-//const strategy = new FusedStochasticBitNetStrategy();
+const strategy = new StochasticBitNetStrategy(20.0, 0.5);
+//const strategy = new ReferenceBitNetStrategy();
 const learningRate = new LearningRate((step: number) => 0.001);
 const optimizer = new StrategyBitNetOptimizer(strategy, learningRate);
-const callback = new TrainingMonitorCallback();
+
+const callbacks = [
+  // Reports loss on first pass
+  new FirstPassLossCallback(),
+  // General training monitoring
+  new TrainingMonitorCallback(),
+  // Prints a loss curve
+  new TerminalChartCallback(),
+];
 
 // Input hidden layer: 784 inputs -> 128 hidden units with ReLU activation
 model.add(
@@ -81,7 +90,7 @@ async function runTraining(): Promise<void> {
     epochs: 5,
     batchSize: 64,
     validationData: [testData.xs, testData.ys],
-    callbacks: [callback],
+    callbacks,
   });
 
   console.log("\nTraining complete!");

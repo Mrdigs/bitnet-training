@@ -37,10 +37,11 @@ async function runHighLossHockeyStickBattle() {
     outFeatures: DIM_SIZE,
     gradScale: GRAD_SCALE,
     K,
-    codec: new DynamicSymmetricalCodec(sharedRandomWeights),
-    inertiaStrategy: new ProportionalCoolingFlywheelStrategy(0.75, 1.0, 1.5),
-    gateStrategy: new TernaryStepGateStrategy(),
-    quantizer: new SymmetricalVarianceQuantizer(sharedRandomWeights),
+    //codec: new DynamicSymmetricalCodec(sharedRandomWeights),
+    //inertiaStrategy: new ProportionalCoolingFlywheelStrategy(0.75, 1.0, 1.5),
+    //gateStrategy: new TernaryStepGateStrategy(),
+    //quantizer: new SymmetricalVarianceQuantizer(sharedRandomWeights),
+    initialWeights: sharedRandomWeights, // Enforces perfect synchronized initialization scale at birth!
   });
 
   // 3. Instantiate Adam baseline natively injecting the shared matrix directly through configuration variables

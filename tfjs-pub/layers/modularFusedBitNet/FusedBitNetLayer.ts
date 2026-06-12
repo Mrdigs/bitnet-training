@@ -2,10 +2,7 @@
 import * as tf from "@tensorflow/tfjs";
 import { ParameterStorageCodec, ForwardProjectionQuantizer, InertiaUpdateStrategy, StochasticGateStrategy } from "./lib/interfaces";
 import { DynamicSymmetricalCodec } from "./lib/codec/DynamicSymmetricalCodec";
-import { BitNetGammaQuantizer } from "./lib/quantizer/BitNetGammaQuantizer";
-import { ContinuousWarpInertiaStrategy } from "./lib/inertiaStrategy/ContinuousWarpInertiaStrategy";
 import { TernaryStepGateStrategy } from "./lib/gateStrategy/TernaryStepGateStrategy";
-import { Fused2bW6bMCodec } from "./lib/codec/Fused2bW6bMCodec";
 import { ProportionalCoolingFlywheelStrategy } from "./lib/inertiaStrategy/ProportionalCoolingFlywheelStrategy";
 import { SymmetricalVarianceQuantizer } from "./lib/quantizer/SymmetricalVarianceQuantizer";
 

@@ -67,7 +67,7 @@ export class StrategyBitNetLayer extends tf.layers.Layer {
       const baseFloatWeights = floatInitializer.apply([inputDim, this.units], "float32");
 
       // 4. Transform the floating-point initialization values into the strategy's target configuration
-      const transformedInitialWeights = this.strategy.prepareInitialWeights(baseFloatWeights);
+      const transformedInitialWeights = this.strategy.prepareInitialWeights(baseFloatWeights, this.layerState);
 
       // 5. Commit an atomic assignment operation to push the packed parameter configuration directly to the GPU
       // Read out the target underlying variable reference and force mutate it.

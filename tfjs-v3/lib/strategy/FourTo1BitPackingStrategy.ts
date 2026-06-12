@@ -119,26 +119,9 @@ export abstract class FourTo1BitPackingStrategy implements IBitNetStrategy {
     });
   }
 
-  public prepareInitialWeights(rawFloatWeights: tf.Tensor): tf.Tensor {
-    return tf.tidy(() => {
-      const maxVal = tf.max(tf.abs(rawFloatWeights));
-      const scaleGuard = tf.maximum(maxVal, tf.scalar(1e-5));
-      const normalizedDist = tf.mul(tf.div(rawFloatWeights, scaleGuard), tf.scalar(1.2, "float32"));
-      const ternaryRaw = tf.clipByValue(tf.round(normalizedDist), -1, 1);
+  public abstract prepareInitialWeights(rawFloatWeights: tf.Tensor, state: PersistentState): tf.Tensor;
 
-      const unsignedWeights = tf.add(ternaryRaw, tf.scalar(1.0, "float32")).toInt();
-      const initialMomentum = tf.zerosLike(unsignedWeights);
-
-      return this.pack(unsignedWeights, initialMomentum);
-    });
-  }
-
-  public decodeWeights(packedTensor: tf.Tensor, state: PersistentState): tf.Tensor {
-    return tf.tidy(() => {
-      const { weight } = this.unpack(packedTensor);
-      return tf.sub(weight.toFloat(), tf.scalar(1.0, "float32"));
-    });
-  }
+  public abstract decodeWeights(packedTensor: tf.Tensor, state: PersistentState): tf.Tensor;
 
   public abstract quantizeActivations(inputs: tf.Tensor, state: PersistentState): tf.Tensor;
 

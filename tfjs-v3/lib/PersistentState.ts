@@ -37,6 +37,16 @@ export class PersistentState {
     }
   }
 
+  public delete(key: string): void {
+    const oldTensor = this.tensors.get(key);
+
+    this.tensors.delete(key);
+
+    if (oldTensor) {
+      oldTensor.dispose();
+    }
+  }
+
   /**
    * Reclaims all GPU/CPU tracking memory allocated to this state instance.
    */

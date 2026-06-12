@@ -18,7 +18,7 @@ class ConcretePackingStrategy extends FourTo1BitPackingStrategy {
   }
 }
 
-describe.only("FourTo1BitPackingStrategy Unit Tests", () => {
+describe("FourTo1BitPackingStrategy Unit Tests", () => {
   let strategy: FourTo1BitPackingStrategy;
   let dummyState: PersistentState;
 

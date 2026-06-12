@@ -10,7 +10,7 @@ export interface IBitNetStrategy {
   /**
    * Transforms raw float baseline initial weights into the strategy's custom configuration layout.
    */
-  prepareInitialWeights(rawFloatWeights: tf.Tensor): tf.Tensor;
+  prepareInitialWeights(rawFloatWeights: tf.Tensor, state: PersistentState): tf.Tensor;
 
   /**
    * Straight-Through Estimator forward decoder pass.
