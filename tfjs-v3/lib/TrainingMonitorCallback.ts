@@ -8,12 +8,6 @@ export class TrainingMonitorCallback extends tf.CustomCallback {
 
   constructor() {
     super({
-      // Hook 1: Fires at the absolute start of model.fit()
-      onTrainBegin: async () => {
-        this.startTensorBytes = tf.memory().numBytes;
-        this.startProcessRss = process.memoryUsage().rss;
-      },
-
       // Hook 2: Fires at the end of every individual epoch
       onEpochEnd: async (epoch: number, logs?: tf.Logs) => {
         if (logs) {
@@ -47,5 +41,7 @@ export class TrainingMonitorCallback extends tf.CustomCallback {
         console.log(`====================================\n`);
       },
     });
+    this.startTensorBytes = tf.memory().numBytes;
+    this.startProcessRss = process.memoryUsage().rss;
   }
 }

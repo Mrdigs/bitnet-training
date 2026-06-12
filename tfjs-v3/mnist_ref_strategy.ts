@@ -7,6 +7,8 @@ import { StrategyBitNetOptimizer } from "./lib/StrategyBitNetOptimizer";
 import { FusedStochasticBitNetStrategy } from "./lib/strategy/FusedStochasticBitNetStrategy";
 import { LearningRate } from "./lib/LearningRate";
 import { TrainingMonitorCallback } from "./lib/TrainingMonitorCallback";
+import { FlatFusedBitNetStrategy } from "./lib/strategy/FlatFusedBitNetStrategy";
+import { FourTo1BitPackingStrategy } from "./lib/strategy/FourTo1BitPackingStrategy";
 
 interface TensorDataPayload {
   xs: tf.Tensor2D;
@@ -39,10 +41,13 @@ const testData: TensorDataPayload = convertToTensors(mnistData.test);
 console.log("Building the model architecture...");
 const model: tf.Sequential = tf.sequential();
 
-const strategy = new ReferenceBitNetStrategy();
+const strategy = new FourTo1BitPackingStrategy();
+//const strategy = new ReferenceBitNetStrategy();
+//const strategy = new FlatFusedBitNetStrategy();
 //const strategy = new FusedStochasticBitNetStrategy();
 const learningRate = new LearningRate((step: number) => 0.001);
 const optimizer = new StrategyBitNetOptimizer(strategy, learningRate);
+const callback = new TrainingMonitorCallback();
 
 // Input hidden layer: 784 inputs -> 128 hidden units with ReLU activation
 model.add(
@@ -80,7 +85,7 @@ async function runTraining(): Promise<void> {
     epochs: 5,
     batchSize: 64,
     validationData: [testData.xs, testData.ys],
-    callbacks: [new TrainingMonitorCallback()],
+    callbacks: [callback],
   });
 
   console.log("\nTraining complete!");

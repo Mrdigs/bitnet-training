@@ -1,6 +1,7 @@
 export interface ILearningRate {
   getLearningRate(): number;
   incrementStep(): void;
+  getStep(): number;
 }
 
 export class LearningRate {
@@ -17,6 +18,10 @@ export class LearningRate {
   // Sampled dynamically inside the layer's gradFunc
   public getLearningRate(): number {
     return this.schedulerFunc(this.currentStep);
+  }
+
+  public getStep(): number {
+    return this.currentStep;
   }
 
   // Triggered exactly once per batch by your custom optimizer

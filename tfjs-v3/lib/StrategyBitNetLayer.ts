@@ -102,8 +102,9 @@ export class StrategyBitNetLayer extends tf.layers.Layer {
           value: decoded,
           gradFunc: (dy: tf.Tensor) => {
             return tf.tidy(() => {
+              const currentStep = this.learningRate.getStep();
               const learningRate = this.learningRate.getLearningRate();
-              return this.strategy.computeUpdate(rawPackedWeight, dy, this.layerState, learningRate);
+              return [this.strategy.computeUpdate(rawPackedWeight, dy, this.layerState, learningRate, currentStep)];
             });
           },
         };

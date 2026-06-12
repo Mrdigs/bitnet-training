@@ -1,4 +1,4 @@
-import * as tf from "@tensorflow/tfjs";
+import * as tf from "@tensorflow/tfjs-node";
 import { IBitNetStrategy } from "../IBitNetStrategy";
 import { PersistentState } from "../PersistentState";
 
@@ -58,47 +58,30 @@ export class ReferenceBitNetStrategy implements IBitNetStrategy {
       throw new Error("Dequantization failed: Context scales are missing.");
     }
 
-    // 1. Extract the raw numerical value arrays directly out of the tracking instances
-    const etaVal = eta.dataSync();
-    const betaVal = beta.dataSync();
-
-    // 2. Instantiate fresh, disconnected constant tensors from the primitive arrays.
-    // Because they are new allocations, the gradient tape will completely ignore them.
-    const staticEta = tf.tensor(etaVal, eta.shape, eta.dtype);
-    const staticBeta = tf.tensor(betaVal, beta.shape, beta.dtype);
-
-    // 3. Compute output scaling using the detached constants
-    const rescaled = tf.mul(rawOutputs, tf.div(tf.mul(staticEta, staticBeta), tf.scalar(127.0, "float32")));
-
-    // 4. Dispose of the temporary detached tensors immediately to prevent VRAM accumulation
-    staticEta.dispose();
-    staticBeta.dispose();
-
-    return rescaled;
+    // FIX: Removed .dataSync() to keep the automatic differentiation tape intact
+    return tf.mul(rawOutputs, tf.div(tf.mul(eta, beta), tf.scalar(127.0, "float32")));
   }
 
-  public computeUpdate(weight: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor {
+  public computeUpdate(weight: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number, currentStep: number): tf.Tensor {
     const beta1 = 0.9;
     const beta2 = 0.999;
     const eps = 1e-8;
 
     const firstMoment = state.getOrCreate("m", () => tf.zerosLike(weight));
     const secondMoment = state.getOrCreate("v", () => tf.zerosLike(weight));
-    const stepCounter = state.getOrCreate("t", () => tf.scalar(0));
 
-    const nextStep = tf.add(stepCounter, tf.scalar(1));
     const nextM = tf.add(tf.mul(firstMoment, beta1), tf.mul(gradient, 1 - beta1));
     const nextV = tf.add(tf.mul(secondMoment, beta2), tf.mul(tf.square(gradient), 1 - beta2));
 
-    const mHat = tf.div(nextM, tf.sub(tf.scalar(1), tf.pow(tf.scalar(beta1), nextStep)));
-    const vHat = tf.div(nextV, tf.sub(tf.scalar(1), tf.pow(tf.scalar(beta2), nextStep)));
+    // FIX: Use pure JS numeric calculations for step tracking to prevent graph memory leaks
+    const mHat = tf.div(nextM, tf.scalar(1 - Math.pow(beta1, currentStep + 1)));
+    const vHat = tf.div(nextV, tf.scalar(1 - Math.pow(beta2, currentStep + 1)));
 
     const updateDelta = tf.div(mHat, tf.add(tf.sqrt(vHat), tf.scalar(eps)));
     const nextWeight = tf.sub(weight, tf.mul(updateDelta, tf.scalar(learningRate)));
 
     state.set("m", nextM);
     state.set("v", nextV);
-    state.set("t", nextStep);
 
     return nextWeight;
   }
