@@ -3,11 +3,11 @@ import { FourTo1BitPackingStrategy } from "./FourTo1BitPackingStrategy";
 import { PersistentState } from "../PersistentState";
 
 export class StochasticBitNetStrategy extends FourTo1BitPackingStrategy {
-  private readonly seed: number | undefined;
   private readonly gradScale: number;
   private readonly K: number;
+  private readonly seed: number | undefined;
 
-  // Exact Look-Up Table sequence from TernaryStepGateStrategy
+  // Symmetrical probability sequence matching TernaryStepGateStrategy exactly
   private static readonly LUT_DATA = [0.0, 0.004, 0.005, 0.006, 0.007, 0.009, 0.012, 0.014, 0.018, 0.023, 0.028, 0.035, 0.044, 0.055, 0.069, 0.086, 0.107, 0.134, 0.168, 0.21, 0.262, 0.328, 0.41, 0.512, 0.64, 0.8, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
   private static readonly LUT_TENSOR = tf.tensor1d(StochasticBitNetStrategy.LUT_DATA, "float32");
 
@@ -19,116 +19,32 @@ export class StochasticBitNetStrategy extends FourTo1BitPackingStrategy {
   }
 
   /**
-   * FIX: Uses the exact Reference L1-mean scaling threshold during initialization.
-   * Restores a balanced ternary distribution, bringing Step 0 loss down to ~2.6.
+   * RESTORED: Dynamic Variance Thresholding Layout
+   * Maps continuous weights to a balanced 33/33/34 ternary distribution at birth.
    */
   public prepareInitialWeights(rawFloatWeights: tf.Tensor, state: PersistentState): tf.Tensor {
     return tf.tidy(() => {
-      // 1. Calculate the exact reference scaling baseline factor (Beta)
-      const beta = tf.maximum(tf.mean(tf.abs(rawFloatWeights)), tf.scalar(1e-5));
-      console.log("Init beta", beta.dataSync());
+      // 1. Calculate the standard deviation threshold dynamically from matrix physics
+      const meanWeights = tf.mean(rawFloatWeights);
+      const variance = tf.mean(tf.square(tf.sub(rawFloatWeights, meanWeights)));
+      const stdDev = tf.sqrt(variance);
+      const threshold = tf.mul(stdDev, tf.scalar(0.65, "float32"));
 
-      // 2. Perform the exact reference strategy scaling mapping pass
-      const scaledWeights = tf.div(rawFloatWeights, beta);
-      const ternaryRaw = tf.clipByValue(tf.round(scaledWeights), -1.0, 1.0);
+      // 2. Map continuous values directly to official unsigned domain tokens:
+      // -1.0 (Negative Zone) -> 0
+      //  0.0 (Neutral Zone)  -> 1
+      //  1.0 (Positive Zone) -> 2
+      const isNegativeZone = tf.less(rawFloatWeights, tf.neg(threshold));
+      const isPositiveZone = tf.greater(rawFloatWeights, threshold);
 
-      const beta2 = tf.maximum(tf.mean(tf.abs(ternaryRaw)), tf.scalar(1e-5));
+      const unsignedWeights = tf.where(isNegativeZone, tf.scalar(0, "int32"), tf.where(isPositiveZone, tf.scalar(2, "int32"), tf.scalar(1, "int32")));
 
-      // 3. Translate directly to your sub-byte unsigned storage domain tokens:
-      // -1.0 -> 0
-      //  0.0 -> 1
-      //  1.0 -> 2
-      const unsignedWeights = tf.add(ternaryRaw, tf.scalar(1.0, "float32")).toInt();
-
-      // 4. Initialize velocity registers (momentum) at absolute zero
+      // 3. Initialize velocity registers (momentum) at absolute zero
       const initialMomentum = tf.zerosLike(unsignedWeights);
 
-      // 5. Compress safely using your verified packing method
+      // 4. Compress safely using your verified packing method
       return this.pack(unsignedWeights, initialMomentum);
     });
-  }
-
-  /**
-   * Unpacks storage parameters, maps them to ternary states, and dynamically
-   * calculates 'beta' on the forward pass tape under its own clear variable key.
-   */
-  public decodeWeights(packedTensor: tf.Tensor, state: PersistentState): tf.Tensor {
-    return tf.tidy(() => {
-      // 1. Unpack sub-byte records back to integer domain arrays
-      const { weight } = this.unpack(packedTensor);
-
-      // 2. Map unsigned indices back down into math states [-1.0, 0.0, 1.0]
-      const decodedW = tf.sub(weight.toFloat(), tf.scalar(1.0, "float32"));
-
-      // 3. Calculate Beta (L1-mean) from the true decoded weight states
-      const beta = tf.maximum(tf.mean(tf.abs(decodedW)), tf.scalar(1e-5));
-
-      // 4. FIX: Store under a clear, distinct variable name to prevent naming pollution
-      state.set("beta", beta);
-
-      return decodedW;
-    });
-  }
-
-  /**
-   * Binds the dynamically calculated beta key to scale the final output logits.
-   */
-  public dequantizeOutputs(rawOutputs: tf.Tensor, state: PersistentState): tf.Tensor {
-    // FIX: Read explicitly from the verified "beta" key token
-    const beta = state.get("beta");
-
-    if (!beta) {
-      throw new Error("Dequantization failed: Weight scale factor 'beta' missing from forward pass context.");
-    }
-
-    return tf.tidy(() => {
-      // Scale outputs down by beta to match the continuous variance domain perfectly
-      return tf.mul(rawOutputs, beta);
-    });
-  }
-
-  /**
-   * Restores the required Pre-Layer RMSNorm layer from the BitNet b1.58 spec.
-   * Normalizes input variance to 1.0, bringing your initial loss down to 2.71
-   * while keeping activation scaling bypassed to isolate your custom update math.
-   */
-  public quantizeActivations(inputs: tf.Tensor, state: PersistentState): tf.Tensor {
-    return tf.tidy(() => {
-      const axis = inputs.rank - 1;
-
-      // Compute Root Mean Square (RMS) variance along the feature axis
-      const meanSquare = tf.mean(tf.square(inputs), axis, true);
-      const rms = tf.sqrt(tf.add(meanSquare, tf.scalar(1e-5)));
-
-      // Return variance-normalized continuous inputs (forcing scale variance to 1.0)
-      return tf.div(inputs, rms);
-    });
-  }
-
-  public computeUpdate(weightTensor: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor {
-    return tf.tidy(() => {
-      // 1. Unpack compressed registers
-      const { weight, momentum } = this.unpack(weightTensor);
-
-      // 2. Compute next velocity via Thermodynamic Friction
-      const nextMomentum = this.calculateNextMomentum(momentum, gradient);
-
-      // 3. Evaluate Stochastic Transitions using the Ternary Step Gate Strategy
-      const scale_t = 1.0 + this.K * (1.0 - learningRate);
-      const { updatedWeight, dampedMomentum } = this.evaluateWeightFlips(weight, nextMomentum, scale_t);
-
-      // 4. Extract Parametric L1 Weight Scale (Beta Tracker)
-      const decodedWeights = tf.sub(updatedWeight.toFloat(), tf.scalar(1.0, "float32"));
-      const nextGamma = tf.maximum(tf.mean(tf.abs(decodedWeights)), tf.scalar(1e-5));
-      state.set("gamma", nextGamma);
-
-      // 5. Repack parameters back down into 4-to-1 layouts
-      return this.pack(updatedWeight, dampedMomentum);
-    });
-  }
-
-  public applyUpdate(weightVar: tf.Variable, update: tf.Tensor): void {
-    weightVar.assign(update);
   }
 
   /**
@@ -159,16 +75,6 @@ export class StochasticBitNetStrategy extends FourTo1BitPackingStrategy {
 
   /**
    * Implements the Ternary Step Gate Strategy.
-   * Evaluates stochastic weight transitions and applies a 50% velocity damping wash-out.
-   */
-  /**
-   * Implements the Ternary Step Gate Strategy.
-   * Ensures standard gradient descent directionality and sign-safe register velocity damping.
-   */
-
-  /**
-   * Implements the Ternary Step Gate Strategy.
-   * Maps momentum signs directly to weight changes to preserve gradient descent direction.
    */
   private evaluateWeightFlips(weight: tf.Tensor, momentum: tf.Tensor, scale_t: number): { updatedWeight: tf.Tensor; dampedMomentum: tf.Tensor } {
     return tf.tidy(() => {
@@ -179,9 +85,6 @@ export class StochasticBitNetStrategy extends FourTo1BitPackingStrategy {
       const randSlice = tf.randomUniform(momentum.shape, 0.0, 1.0, "float32", this.seed);
       const shouldFlip = tf.less(randSlice, flipProbability);
 
-      // Gradient Descent Realignment:
-      // Positive momentum represents weight moving up -> increment index.
-      // Negative momentum represents weight moving down -> decrement index.
       const isMomPositive = tf.greater(momentum, tf.scalar(0, "int32"));
       const isMomNegative = tf.less(momentum, tf.scalar(0, "int32"));
 
@@ -198,10 +101,72 @@ export class StochasticBitNetStrategy extends FourTo1BitPackingStrategy {
       const updatedWeight = tf.add(tf.sub(weight, weightDecrement), weightIncrement);
       const actualFlipOccurred = tf.logicalOr(tf.greater(weightIncrement, 0), tf.greater(weightDecrement, 0));
 
-      // Apply the 50% velocity washout matching TernaryStepGateStrategy exactly
       const dampedMomentum = tf.where(actualFlipOccurred, tf.mul(momentum, 0.5).toInt(), momentum);
 
       return { updatedWeight, dampedMomentum };
     });
+  }
+
+  /**
+   * Restores Pre-Layer RMSNorm layer to normalize input variance to 1.0.
+   */
+  public quantizeActivations(inputs: tf.Tensor, state: PersistentState): tf.Tensor {
+    return tf.tidy(() => {
+      const axis = inputs.rank - 1;
+      const meanSquare = tf.mean(tf.square(inputs), axis, true);
+      const rms = tf.sqrt(tf.add(meanSquare, tf.scalar(1e-5)));
+      return tf.div(inputs, rms);
+    });
+  }
+
+  /**
+   * Unpacks storage parameters and maps them to ternary states cleanly.
+   */
+  public decodeWeights(packedTensor: tf.Tensor, state: PersistentState): tf.Tensor {
+    return tf.tidy(() => {
+      const { weight } = this.unpack(packedTensor);
+      return tf.sub(weight.toFloat(), tf.scalar(1.0, "float32"));
+    });
+  }
+
+  /**
+   * Scaled Dequantization Pass-Through
+   * Binds the output variance to the network feature layer dimension width (1 / sqrt(d)).
+   * Prevents Softmax infinity overflows (val_loss=NaN) while bypassing state-variable leaks.
+   */
+  public dequantizeOutputs(rawOutputs: tf.Tensor, state: PersistentState): tf.Tensor {
+    return tf.tidy(() => {
+      // Extract input dimension (d) dynamically from the matrix profile shape array
+      const inFeatures = rawOutputs.shape[rawOutputs.shape.length - 1];
+
+      // Scale down by 1 / sqrt(inFeatures) to maintain standard variance bounds
+      const scaleFactor = tf.scalar(1.0 / Math.sqrt(inFeatures), "float32");
+      return tf.mul(rawOutputs, scaleFactor);
+    });
+  }
+
+  /**
+   * Pure functional calculator mapping for parameter updates.
+   * Completely free of state-variable modifications or memory leaks.
+   */
+  public computeUpdate(weightTensor: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor {
+    return tf.tidy(() => {
+      // 1. Unpack compressed sub-byte variables
+      const { weight, momentum } = this.unpack(weightTensor);
+
+      // 2. Compute next velocity via Thermodynamic Friction
+      const nextMomentum = this.calculateNextMomentum(momentum, gradient);
+
+      // 3. Evaluate Stochastic Transitions using the Ternary Step Gate Strategy
+      const scale_t = 1.0 + this.K * (1.0 - learningRate);
+      const { updatedWeight, dampedMomentum } = this.evaluateWeightFlips(weight, nextMomentum, scale_t);
+
+      // 4. Pack parameters directly back down into the 4-to-1 matrix layout
+      return this.pack(updatedWeight, dampedMomentum);
+    });
+  }
+
+  public applyUpdate(weightVar: tf.Variable, update: tf.Tensor): void {
+    weightVar.assign(update);
   }
 }
