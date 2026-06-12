@@ -2,151 +2,30 @@ import * as tf from "@tensorflow/tfjs-node";
 import { IBitNetStrategy } from "../IBitNetStrategy";
 import { PersistentState } from "../PersistentState";
 
-export class FourTo1BitPackingStrategy implements IBitNetStrategy {
-  /**
-   * Compresses the input dimension by exactly 4.
-   * If input features is 128, the physical variable shape becomes 32.
-   */
-  public getPackedShape(outFeatures: number, inFeatures: number): tf.Shape {
-    if (inFeatures % 4 !== 0) {
-      throw new Error(`Input features (${inFeatures}) must be perfectly divisible by 4 for packing.`);
-    }
-    return [inFeatures / 4, outFeatures];
-  }
+export abstract class FourTo1BitPackingStrategy implements IBitNetStrategy {
+  // 1. PRE-ALLOCATED MODULO DIVISORS (Replacing Bitwise AND Masks to leverage native shape broadcasting)
+  private static readonly DIVISOR_BYTE = tf.scalar(256, "int32"); // Emulates masking lowest 8 bits
+  private static readonly DIVISOR_WEIGHT = tf.scalar(4, "int32"); // Emulates masking lowest 2 bits
+  private static readonly DIVISOR_MOMENTUM = tf.scalar(64, "int32"); // Emulates masking 6 bits for state
+
+  // 2. PRE-ALLOCATED MULTIPLIERS (Emulating Left-Shifts via Vectorized Multiplication)
+  private static readonly SHIFT_L_WEIGHT_TO_MOM = tf.scalar(4, "int32"); // << 2
+  private static readonly SHIFT_L_B1 = tf.scalar(256, "int32"); // << 8
+  private static readonly SHIFT_L_B2 = tf.scalar(65536, "int32"); // << 16
+  private static readonly SHIFT_L_B3 = tf.scalar(16777216, "int32"); // << 24
+
+  // 3. PRE-ALLOCATED DENOMINATORS (Emulating Right-Shifts via Vectorized Floor Division)
+  private static readonly SHIFT_R_WEIGHT_TO_MOM = tf.scalar(4, "int32"); // >> 2
+  private static readonly SHIFT_R_B1 = tf.scalar(256, "int32"); // >> 8
+  private static readonly SHIFT_R_B2 = tf.scalar(65536, "int32"); // >> 16
+  private static readonly SHIFT_R_B3 = tf.scalar(16777216, "int32"); // >> 24
+
+  // 4. ARITHMETIC SIGN BOUNDARY CONSTANTS
+  private static readonly OFFSET_MOMENTUM = tf.scalar(32, "int32");
 
   /**
-   * Losslessly packs weight arrays (0, 1, 2) and signed momentum arrays (-32 to 31)
-   * into a compact, single int32 tensor layout, then masks it as float32.
-   */
-  public pack(weight: tf.Tensor, momentum: tf.Tensor): tf.Tensor {
-    return tf.tidy(() => {
-      const [inFeatures, outFeatures] = weight.shape;
-
-      // 1. Enforce bit-width safety barriers
-      const uWeight = tf.clipByValue(weight.toInt(), 0, 2);
-      const sMomentum = tf.clipByValue(momentum.toInt(), -32, 31);
-
-      // 2. Map signed momentum [-32, 31] to unsigned via offset addition
-      const uMomentum = tf.add(sMomentum, tf.scalar(32, "int32"));
-
-      // 3. Fuse parameters into an 8-bit block (Weight using bits 0-1, Momentum using bits 2-7)
-      const fusedByte = tf.add(uWeight, tf.mul(uMomentum, tf.scalar(4, "int32")));
-
-      // 4. Slice the dense array vertically into 4 sequential blocks along the input axis
-      const splitRows = fusedByte.reshape([inFeatures / 4, 4, outFeatures]);
-
-      const b0 = splitRows.gather(tf.scalar(0, "int32"), 1).reshape([inFeatures / 4, outFeatures]);
-      const b1 = splitRows.gather(tf.scalar(1, "int32"), 1).reshape([inFeatures / 4, outFeatures]);
-      const b2 = splitRows.gather(tf.scalar(2, "int32"), 1).reshape([inFeatures / 4, outFeatures]);
-      const b3 = splitRows.gather(tf.scalar(3, "int32"), 1).reshape([inFeatures / 4, outFeatures]);
-
-      // 5. Stride parameters using 8-bit byte intervals (1, 256, 65536, 16777216)
-      const p0 = b0;
-      const p1 = tf.mul(b1, tf.scalar(256, "int32"));
-      const p2 = tf.mul(b2, tf.scalar(65536, "int32"));
-      const p3 = tf.mul(b3, tf.scalar(16777216, "int32"));
-
-      const packedIntegerTensor = tf.add(tf.add(tf.add(p0, p1), p2), p3);
-
-      // EXIT GATE: Disguise the completed int32 block as a float32 to pass validation layers
-      return this.spoofType(packedIntegerTensor, "float32");
-    });
-  }
-
-  /**
-   * Decodes a compressed variable buffer back into separate weight and momentum tracks.
-   */
-  public unpack(packedTensor: tf.Tensor): { weight: tf.Tensor; momentum: tf.Tensor } {
-    return tf.tidy(() => {
-      const [packedIn, outFeatures] = packedTensor.shape;
-
-      const fused = this.spoofType(packedTensor.clone(), "int32");
-
-      // Extract the 4 separate byte streams using pure integer remainder math
-      const b0 = tf.mod(fused, tf.scalar(256, "int32"));
-      const s1 = tf.floorDiv(fused, tf.scalar(256, "int32"));
-      const b1 = tf.mod(s1, tf.scalar(256, "int32"));
-      const s2 = tf.floorDiv(fused, tf.scalar(65536, "int32"));
-      const w2 = tf.mod(s2, tf.scalar(256, "int32"));
-      const s3 = tf.floorDiv(fused, tf.scalar(16777216, "int32"));
-      const b3 = tf.mod(s3, tf.scalar(256, "int32"));
-
-      // OPTIMIZATION: Stack the arrays directly into a single unified tensor block
-      const denseBytes = tf.stack([b0, b1, w2, b3], 1).reshape([packedIn * 4, outFeatures]);
-
-      // Separate weight bits from momentum bits
-      const weight = tf.mod(denseBytes, tf.scalar(4, "int32"));
-      const uMomentum = tf.floorDiv(denseBytes, tf.scalar(4, "int32"));
-      const momentum = tf.sub(uMomentum, tf.scalar(32, "int32"));
-
-      return { weight, momentum };
-    });
-  }
-
-  /**
-   * Initialises weights cleanly from full-precision Glorot Uniform distributions.
-   */
-  public prepareInitialWeights(rawFloatWeights: tf.Tensor): tf.Tensor {
-    return tf.tidy(() => {
-      // Scale against maximum peaks to balance ternary thresholds evenly
-      const maxVal = tf.max(tf.abs(rawFloatWeights));
-      const scaleGuard = tf.maximum(maxVal, tf.scalar(1e-5));
-      const normalizedDist = tf.mul(tf.div(rawFloatWeights, scaleGuard), tf.scalar(1.2, "float32"));
-      const ternaryRaw = tf.clipByValue(tf.round(normalizedDist), -1, 1);
-
-      // Map signed values (-1, 0, 1) -> unsigned bit-indices (0, 1, 2)
-      const unsignedWeights = tf.add(ternaryRaw, tf.scalar(1.0, "float32")).toInt();
-      const initialMomentum = tf.zerosLike(unsignedWeights);
-
-      // Pack automatically executes our float32 spoof exit gate
-      return this.pack(unsignedWeights, initialMomentum);
-    });
-  }
-
-  /**
-   * Decodes the packed array to provide high-precision float weights for tf.matMul execution.
-   */
-  public decodeWeights(packedTensor: tf.Tensor, state: PersistentState): tf.Tensor {
-    return tf.tidy(() => {
-      const { weight } = this.unpack(packedTensor);
-
-      // Map unsigned indices (0, 1, 2) back to active execution float parameters (-1.0, 0.0, 1.0)
-      return tf.sub(weight.toFloat(), tf.scalar(1.0, "float32"));
-    });
-  }
-
-  // --- Pass-Through Activation Stubs ---
-  public quantizeActivations(inputs: tf.Tensor, state: PersistentState): tf.Tensor {
-    return inputs;
-  }
-
-  public dequantizeOutputs(rawOutputs: tf.Tensor, state: PersistentState): tf.Tensor {
-    return rawOutputs;
-  }
-
-  /**
-   * Structural pass-through for baseline validation testing.
-   * Leverages pack/unpack internally so type modifications remain seamlessly automated.
-   */
-  public computeUpdate(weightTensor: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor {
-    return tf.tidy(() => {
-      // Unpack extracts true, uncorrupted int32 components safely
-      const { weight, momentum } = this.unpack(weightTensor);
-
-      // (Stochastic gradient updates will be layered right here)
-
-      // Pack handles our float32 wrapper spoofing seamlessly on output
-      return this.pack(weight, momentum);
-    });
-  }
-
-  public applyUpdate(weightVar: tf.Variable, update: tf.Tensor): void {
-    weightVar.assign(update);
-  }
-
-  /**
-   * Private utility to forcefully overwrite the JavaScript metadata wrapper tag.
-   * This bypasses physical tf.cast allocations, keeping the underlying memory buffers intact.
+   * Utility to forcefully swap the JavaScript wrapper's type descriptor metadata.
+   * Keeps the underlying physical C++ memory buffers perfectly untouched.
    */
   private spoofType(tensor: tf.Tensor, targetType: "float32" | "int32"): tf.Tensor {
     Object.defineProperty(tensor, "dtype", {
@@ -157,4 +36,115 @@ export class FourTo1BitPackingStrategy implements IBitNetStrategy {
     });
     return tensor;
   }
+
+  public getPackedShape(outFeatures: number, inFeatures: number): tf.Shape {
+    if (inFeatures % 4 !== 0) {
+      throw new Error(`Input features (${inFeatures}) must be perfectly divisible by 4 for packing.`);
+    }
+    return [inFeatures / 4, outFeatures];
+  }
+
+  /**
+   * Packs weight arrays (0, 1, 2) and signed momentum arrays (-32 to 31) into
+   * an int32 layout using broadcasting math, exiting disguised as a float32.
+   */
+  public pack(weight: tf.Tensor, momentum: tf.Tensor): tf.Tensor {
+    return tf.tidy(() => {
+      const [inFeatures, outFeatures] = weight.shape;
+
+      const uWeight = tf.clipByValue(weight.toInt(), 0, 2);
+      const sMomentum = tf.clipByValue(momentum.toInt(), -32, 31);
+      const uMomentum = tf.add(sMomentum, FourTo1BitPackingStrategy.OFFSET_MOMENTUM);
+
+      // Emulate: (uMomentum << 2) | uWeight using pre-allocated multiplication
+      const shiftedMom = tf.mul(uMomentum, FourTo1BitPackingStrategy.SHIFT_L_WEIGHT_TO_MOM);
+      const fusedByte = tf.mod(tf.add(uWeight, shiftedMom), FourTo1BitPackingStrategy.DIVISOR_BYTE);
+
+      const splitRows = fusedByte.reshape([inFeatures / 4, 4, outFeatures]);
+
+      const b0 = splitRows.gather(tf.scalar(0, "int32"), 1).reshape([inFeatures / 4, outFeatures]);
+      const b1 = splitRows.gather(tf.scalar(1, "int32"), 1).reshape([inFeatures / 4, outFeatures]);
+      const b2 = splitRows.gather(tf.scalar(2, "int32"), 1).reshape([inFeatures / 4, outFeatures]);
+      const b3 = splitRows.gather(tf.scalar(3, "int32"), 1).reshape([inFeatures / 4, outFeatures]);
+
+      // Emulate byte positional left-shifts via pre-allocated multipliers
+      const p0 = b0;
+      const p1 = tf.mul(b1, FourTo1BitPackingStrategy.SHIFT_L_B1);
+      const p2 = tf.mul(b2, FourTo1BitPackingStrategy.SHIFT_L_B2);
+      const p3 = tf.mul(b3, FourTo1BitPackingStrategy.SHIFT_L_B3);
+
+      const packedIntegerTensor = tf.add(tf.add(tf.add(p0, p1), p2), p3);
+
+      // EXIT GATE: Disguise as float32 to bypass layer variable type validation
+      return this.spoofType(packedIntegerTensor, "float32");
+    });
+  }
+
+  /**
+   * Strips the float32 disguise, emulates right shifts using floor division,
+   * and separates data cleanly via native broadcasting modulo steps.
+   */
+  public unpack(packedTensor: tf.Tensor): { weight: tf.Tensor; momentum: tf.Tensor } {
+    return tf.tidy(() => {
+      const [packedIn, outFeatures] = packedTensor.shape;
+
+      // ENTRY GATE: Restore the true int32 type interpretation right upon arrival
+      const fused = this.spoofType(packedTensor.clone(), "int32");
+
+      // Extract the 4 separate byte streams using broadcasting math
+      const b0 = tf.mod(fused, FourTo1BitPackingStrategy.DIVISOR_BYTE);
+
+      const s1 = tf.floorDiv(fused, FourTo1BitPackingStrategy.SHIFT_R_B1);
+      const b1 = tf.mod(s1, FourTo1BitPackingStrategy.DIVISOR_BYTE);
+
+      const s2 = tf.floorDiv(fused, FourTo1BitPackingStrategy.SHIFT_R_B2);
+      const b2 = tf.mod(s2, FourTo1BitPackingStrategy.DIVISOR_BYTE);
+
+      const s3 = tf.floorDiv(fused, FourTo1BitPackingStrategy.SHIFT_R_B3);
+      const b3 = tf.mod(s3, FourTo1BitPackingStrategy.DIVISOR_BYTE);
+
+      // Weave the channels atomically into a single layout allocation block
+      const denseBytes = tf.stack([b0, b1, b2, b3], 1).reshape([packedIn * 4, outFeatures]);
+
+      // Isolate weight bits and state bits using native broadcasting remainder checks
+      const weight = tf.mod(denseBytes, FourTo1BitPackingStrategy.DIVISOR_WEIGHT);
+
+      const sMom = tf.floorDiv(denseBytes, FourTo1BitPackingStrategy.SHIFT_R_WEIGHT_TO_MOM);
+      const uMomentum = tf.mod(sMom, FourTo1BitPackingStrategy.DIVISOR_MOMENTUM);
+
+      // Reverse offset arithmetic to restore standard signed parameters [-32, 31]
+      const momentum = tf.sub(uMomentum, FourTo1BitPackingStrategy.OFFSET_MOMENTUM);
+
+      return { weight, momentum };
+    });
+  }
+
+  public prepareInitialWeights(rawFloatWeights: tf.Tensor): tf.Tensor {
+    return tf.tidy(() => {
+      const maxVal = tf.max(tf.abs(rawFloatWeights));
+      const scaleGuard = tf.maximum(maxVal, tf.scalar(1e-5));
+      const normalizedDist = tf.mul(tf.div(rawFloatWeights, scaleGuard), tf.scalar(1.2, "float32"));
+      const ternaryRaw = tf.clipByValue(tf.round(normalizedDist), -1, 1);
+
+      const unsignedWeights = tf.add(ternaryRaw, tf.scalar(1.0, "float32")).toInt();
+      const initialMomentum = tf.zerosLike(unsignedWeights);
+
+      return this.pack(unsignedWeights, initialMomentum);
+    });
+  }
+
+  public decodeWeights(packedTensor: tf.Tensor, state: PersistentState): tf.Tensor {
+    return tf.tidy(() => {
+      const { weight } = this.unpack(packedTensor);
+      return tf.sub(weight.toFloat(), tf.scalar(1.0, "float32"));
+    });
+  }
+
+  public abstract quantizeActivations(inputs: tf.Tensor, state: PersistentState): tf.Tensor;
+
+  public abstract dequantizeOutputs(rawOutputs: tf.Tensor, state: PersistentState): tf.Tensor;
+
+  public abstract computeUpdate(weightTensor: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor;
+
+  public abstract applyUpdate(weightVar: tf.Variable, update: tf.Tensor): void;
 }

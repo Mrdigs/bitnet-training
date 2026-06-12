@@ -3,12 +3,27 @@ import { expect } from "chai";
 import { FourTo1BitPackingStrategy } from "../lib/strategy/FourTo1BitPackingStrategy";
 import { PersistentState } from "../lib/PersistentState";
 
+class ConcretePackingStrategy extends FourTo1BitPackingStrategy {
+  public quantizeActivations(inputs: tf.Tensor, state: PersistentState): tf.Tensor {
+    throw new Error("Method not implemented.");
+  }
+  public dequantizeOutputs(rawOutputs: tf.Tensor, state: PersistentState): tf.Tensor {
+    throw new Error("Method not implemented.");
+  }
+  public computeUpdate(weightTensor: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor {
+    throw new Error("Method not implemented.");
+  }
+  public applyUpdate(weightVar: tf.Variable, update: tf.Tensor): void {
+    throw new Error("Method not implemented.");
+  }
+}
+
 describe.only("FourTo1BitPackingStrategy Unit Tests", () => {
   let strategy: FourTo1BitPackingStrategy;
   let dummyState: PersistentState;
 
   beforeEach(() => {
-    strategy = new FourTo1BitPackingStrategy();
+    strategy = new ConcretePackingStrategy();
     dummyState = new PersistentState();
   });
 

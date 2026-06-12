@@ -58,8 +58,23 @@ export class ReferenceBitNetStrategy implements IBitNetStrategy {
       throw new Error("Dequantization failed: Context scales are missing.");
     }
 
-    // FIX: Removed .dataSync() to keep the automatic differentiation tape intact
-    return tf.mul(rawOutputs, tf.div(tf.mul(eta, beta), tf.scalar(127.0, "float32")));
+    // 1. Extract the raw numerical value arrays directly out of the tracking instances
+    const etaVal = eta.dataSync();
+    const betaVal = beta.dataSync();
+
+    // 2. Instantiate fresh, disconnected constant tensors from the primitive arrays.
+    // Because they are new allocations, the gradient tape will completely ignore them.
+    const staticEta = tf.tensor(etaVal, eta.shape, eta.dtype);
+    const staticBeta = tf.tensor(betaVal, beta.shape, beta.dtype);
+
+    // 3. Compute output scaling using the detached constants
+    const rescaled = tf.mul(rawOutputs, tf.div(tf.mul(staticEta, staticBeta), tf.scalar(127.0, "float32")));
+
+    // 4. Dispose of the temporary detached tensors immediately to prevent VRAM accumulation
+    staticEta.dispose();
+    staticBeta.dispose();
+
+    return rescaled;
   }
 
   public computeUpdate(weight: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number, currentStep: number): tf.Tensor {

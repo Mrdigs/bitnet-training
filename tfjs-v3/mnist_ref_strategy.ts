@@ -1,14 +1,10 @@
 import * as tf from "@tensorflow/tfjs-node";
 import mnist, { MnistSample } from "mnist";
-import { ReferenceBitNetLayer } from "./lib/ReferenceBitNetLayer";
 import { ReferenceBitNetStrategy } from "./lib/strategy/ReferenceBitNetStrategy";
 import { StrategyBitNetLayer } from "./lib/StrategyBitNetLayer";
 import { StrategyBitNetOptimizer } from "./lib/StrategyBitNetOptimizer";
-import { FusedStochasticBitNetStrategy } from "./lib/strategy/FusedStochasticBitNetStrategy";
 import { LearningRate } from "./lib/LearningRate";
 import { TrainingMonitorCallback } from "./lib/TrainingMonitorCallback";
-import { FlatFusedBitNetStrategy } from "./lib/strategy/FlatFusedBitNetStrategy";
-import { FourTo1BitPackingStrategy } from "./lib/strategy/FourTo1BitPackingStrategy";
 
 interface TensorDataPayload {
   xs: tf.Tensor2D;
@@ -41,8 +37,8 @@ const testData: TensorDataPayload = convertToTensors(mnistData.test);
 console.log("Building the model architecture...");
 const model: tf.Sequential = tf.sequential();
 
-const strategy = new FourTo1BitPackingStrategy();
-//const strategy = new ReferenceBitNetStrategy();
+// const strategy = new StochasticBitNetStrategy();
+const strategy = new ReferenceBitNetStrategy();
 //const strategy = new FlatFusedBitNetStrategy();
 //const strategy = new FusedStochasticBitNetStrategy();
 const learningRate = new LearningRate((step: number) => 0.001);
