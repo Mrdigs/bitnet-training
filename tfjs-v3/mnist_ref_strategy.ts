@@ -4,10 +4,18 @@ import { ReferenceBitNetStrategy } from "./lib/strategy/ReferenceBitNetStrategy"
 import { StrategyBitNetLayer } from "./lib/StrategyBitNetLayer";
 import { StrategyBitNetOptimizer } from "./lib/StrategyBitNetOptimizer";
 import { LearningRate } from "./lib/LearningRate";
-import { TrainingMonitorCallback } from "./lib/TrainingMonitorCallback";
+import { TrainingMonitorCallback } from "./lib/callback/TrainingMonitorCallback";
 import { StochasticBitNetStrategy } from "./lib/strategy/StochasticBitNetStrategy";
-import { TerminalChartCallback } from "./lib/TerminalChartCallback";
-import { FirstPassLossCallback } from "./lib/FirstPassLossCallback";
+import { TerminalChartCallback } from "./lib/callback/TerminalChartCallback";
+import { FirstPassLossCallback } from "./lib/callback/FirstPassLossCallback";
+import { TernaryWeightDistributionCallback } from "./lib/callback/TernaryWeightDistributionCallback";
+import { UnOptimisedRefStrategy } from "./lib/strategy/UnOptimisedRefStrategy";
+import { MiniBitNetStrategy } from "./lib/strategy/MiniBitNetStrategy";
+import { MagnitudeRefStrategy } from "./lib/strategy/MagnitudeRefStrategy";
+import { MagMiniBitNetStrategy } from "./lib/strategy/MagMiniBitNetStrategy";
+import { AdamMiniBitNetStrategy } from "./lib/strategy/AdamMiniBitNetStrategy";
+import { SpectralRefStrategy } from "./lib/strategy/SpectralRefStrategy";
+import { SparseMiniBitNetStrategy } from "./lib/strategy/SparseMiniBitNetStrategy";
 
 interface TensorDataPayload {
   xs: tf.Tensor2D;
@@ -40,14 +48,39 @@ const testData: TensorDataPayload = convertToTensors(mnistData.test);
 console.log("Building the model architecture...");
 const model: tf.Sequential = tf.sequential();
 
-const strategy = new StochasticBitNetStrategy(20.0, 0.5);
+// NOTE: THIS WAS ACTUALLY A VERY GOOD RESULT!!
+// const strategy = new StochasticBitNetStrategy(60.0, 0.5);
+
+//const strategy = new StochasticBitNetStrategy();
+//const strategy = new StochasticBitNetStrategy(40.0, 0.5);
 //const strategy = new ReferenceBitNetStrategy();
-const learningRate = new LearningRate((step: number) => 0.001);
+//const strategy = new UnOptimisedRefStrategy();
+//const strategy = new SpectralRefStrategy();
+// const strategy = new MagnitudeRefStrategy();
+//const strategy = new AdamMiniBitNetStrategy();
+// const strategy = new MiniBitNetStrategy();
+//const strategy = new MagMiniBitNetStrategy();
+const strategy = new SparseMiniBitNetStrategy();
+
+const learningRate = new LearningRate((step: number) => {
+  /*
+  const START_LR = 0.05; // Adjust based on your current baseline
+  const END_LR = 0.001;
+  const TOTAL_STEPS = 4690; // 5 epochs * ~938 steps per epoch
+  const progress = Math.min(step / TOTAL_STEPS, 1.0);
+  const currentLR = START_LR - progress * (START_LR - END_LR);
+  return currentLR;
+  */
+  return 0.05;
+  // INTERESTING: SEE, ITS THE LEARNING RATE THAT MASSIVELY SCLAES
+  // THE GRADIENTS DOWN - OBVIOUSLY. HOW ABOUT TAKING ANOTHER APPROACH?
+  // return 1;
+});
 const optimizer = new StrategyBitNetOptimizer(strategy, learningRate);
 
 const callbacks = [
   // Reports loss on first pass
-  new FirstPassLossCallback(),
+  // new FirstPassLossCallback(),
   // General training monitoring
   new TrainingMonitorCallback(),
   // Prints a loss curve
@@ -74,6 +107,14 @@ model.add(
     activation: "softmax",
   }),
 );
+
+/*
+callbacks.push(
+  // Reports weight distributions
+  // @ts-expect-error fuck you
+  new TernaryWeightDistributionCallback(model, model.layers[0].name),
+);
+*/
 
 // 3. Compile the Model
 model.compile({

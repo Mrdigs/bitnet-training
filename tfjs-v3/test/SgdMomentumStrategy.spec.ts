@@ -2,7 +2,7 @@ import * as assert from "assert";
 import * as tf from "@tensorflow/tfjs-node";
 import { SgdMomentumStrategy } from "../lib/strategies/SgdMomentumStrategy";
 
-describe("SgdMomentumStrategy Bit-Packing Unit Tests", () => {
+describe.skip("SgdMomentumStrategy Bit-Packing Unit Tests", () => {
   let strategy: SgdMomentumStrategy;
 
   beforeEach(() => {

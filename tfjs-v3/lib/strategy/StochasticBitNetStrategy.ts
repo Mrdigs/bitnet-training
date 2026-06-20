@@ -152,7 +152,7 @@ export class StochasticBitNetStrategy extends FourTo1BitPackingStrategy {
   public computeUpdate(weightTensor: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor {
     return tf.tidy(() => {
       // 1. Unpack compressed sub-byte variables
-      const { weight, momentum } = this.unpack(weightTensor);
+      const { weight, residual: momentum } = this.unpack(weightTensor);
 
       // 2. Compute next velocity via Thermodynamic Friction
       const nextMomentum = this.calculateNextMomentum(momentum, gradient);
@@ -160,6 +160,8 @@ export class StochasticBitNetStrategy extends FourTo1BitPackingStrategy {
       // 3. Evaluate Stochastic Transitions using the Ternary Step Gate Strategy
       const scale_t = 1.0 + this.K * (1.0 - learningRate);
       const { updatedWeight, dampedMomentum } = this.evaluateWeightFlips(weight, nextMomentum, scale_t);
+
+      console.log(tf.min(updatedWeight).dataSync(), tf.max(updatedWeight).dataSync());
 
       // 4. Pack parameters directly back down into the 4-to-1 matrix layout
       return this.pack(updatedWeight, dampedMomentum);

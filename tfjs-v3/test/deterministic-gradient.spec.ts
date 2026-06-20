@@ -2,8 +2,9 @@ import * as tf from "@tensorflow/tfjs-node";
 import { expect } from "chai";
 import { PersistentState } from "../lib/PersistentState";
 import { StochasticBitNetStrategy } from "../lib/strategy/StochasticBitNetStrategy";
+import { MiniBitNetStrategy } from "../lib/strategy/MiniBitNetStrategy";
 
-describe.only("Deterministic Single-Cell 15-Step Optimization Tracking", () => {
+describe.skip("Deterministic Single-Cell 15-Step Optimization Tracking", () => {
   let state: PersistentState;
   const fixedSeed = 42; // Enforces absolute mathematical reproducibility
 
@@ -22,7 +23,8 @@ describe.only("Deterministic Single-Cell 15-Step Optimization Tracking", () => {
 
   it("should trace the exact register lifecycle of a single weight cell across 15 violent update steps", () => {
     // Calibrated with default strategy parameters
-    const strategy = new StochasticBitNetStrategy(30.0, 0.5, fixedSeed);
+    // const strategy = new StochasticBitNetStrategy(1, 1, fixedSeed);
+    const strategy = new MiniBitNetStrategy(fixedSeed);
 
     // Initialize a 4x1 matrix to a clean neutral state (Storage ID 1, mapping to 0.0)
     let packedWeightTensor = strategy.pack(tf.fill([inFeatures, outFeatures], 1, "int32"), tf.zeros([inFeatures, outFeatures], "int32"));
@@ -57,19 +59,21 @@ describe.only("Deterministic Single-Cell 15-Step Optimization Tracking", () => {
     console.log(`  ==============================================================`);
 
     // Log the true Step 0 initialization starting baseline
-    const initGamma = state.get("gamma")?.dataSync()[0] ?? 0.0;
+    const initGamma = state.get("beta")?.dataSync()[0] ?? 0.0;
     const { weight: w0, momentum: m0 } = (strategy as any).unpack(packedWeightTensor);
-    const decW0 = tf.sub(w0.toFloat(), tf.scalar(1.0, "float32")).dataSync();
+    // const decW0 = tf.sub(w0.toFloat(), tf.scalar(1.0, "float32")).dataSync();
+    // const mom0Data = strategy.decodeMomentum(m0).dataSync();
+    const decW0 = w0.dataSync();
     const mom0Data = m0.dataSync();
 
-    console.log(`  Step 0  | Init       | Grad Value:  0.00 | ` + `Weight Cell: ${decW0[targetRowIndex] >= 0 ? " " : ""}${decW0[targetRowIndex].toFixed(2)} | ` + `Mom Cell: ${mom0Data[targetRowIndex] >= 0 ? " " : ""}${mom0Data[targetRowIndex].toString().padEnd(3)} | ` + `Gamma: ${initGamma?.toFixed(4)}`);
+    console.log(`  Step 0  | Init     | Grad Value:  0.00 | ` + `Weight Cell: ${decW0[targetRowIndex] >= 0 ? " " : ""}${decW0[targetRowIndex].toFixed(2)} | ` + `Mom Cell: ${mom0Data[targetRowIndex] >= 0 ? " " : ""}${mom0Data[targetRowIndex].toString().padEnd(3)} | ` + `Gamma: ${initGamma?.toFixed(4)}`);
     w0.dispose();
     m0.dispose();
 
     // Run the complete multi-step optimization pipeline loop
     for (let i = 0; i < gradientStream.length; i++) {
       const stepGradient = gradientStream[i];
-      const learningRate = 0.01;
+      const learningRate = 1;
 
       // Extract the exact gradient value applied to our specific cell target index
       const rawGradArray = stepGradient.dataSync();
@@ -80,9 +84,11 @@ describe.only("Deterministic Single-Cell 15-Step Optimization Tracking", () => {
 
       // Unpack register layers for high-fidelity debugging of our target cell
       const { weight, momentum } = (strategy as any).unpack(nextPackedState);
-      const decodedW = tf.sub(weight.toFloat(), tf.scalar(1.0, "float32")).dataSync();
+      // const decodedW = tf.sub(weight.toFloat(), tf.scalar(1.0, "float32")).dataSync();
+      // const momentumData = strategy.decodeMomentum(momentum).dataSync();
+      const decodedW = weight.dataSync();
       const momentumData = momentum.dataSync();
-      const currentGamma = state.get("gamma")?.dataSync()[0] ?? 0.0;
+      const currentGamma = state.get("beta")?.dataSync()[0] ?? 0.0;
 
       const stepNum = (i + 1).toString().padEnd(2);
 

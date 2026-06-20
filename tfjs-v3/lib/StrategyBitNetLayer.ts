@@ -109,6 +109,7 @@ export class StrategyBitNetLayer extends tf.layers.Layer {
           },
         };
       });
+
       const executableWeights = customGradFactory(rawPackedWeight);
 
       // 3. Perform integer domain Matrix Multiplication

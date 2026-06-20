@@ -53,7 +53,7 @@ export abstract class FourTo1BitPackingStrategy implements IBitNetStrategy {
       const [inFeatures, outFeatures] = weight.shape;
 
       const uWeight = tf.clipByValue(weight.toInt(), 0, 2);
-      const sMomentum = tf.clipByValue(momentum.toInt(), -32, 31);
+      const sMomentum = tf.clipByValue(momentum.toInt(), -31, 31);
       const uMomentum = tf.add(sMomentum, FourTo1BitPackingStrategy.OFFSET_MOMENTUM);
 
       // Emulate: (uMomentum << 2) | uWeight using pre-allocated multiplication
@@ -84,7 +84,7 @@ export abstract class FourTo1BitPackingStrategy implements IBitNetStrategy {
    * Strips the float32 disguise, emulates right shifts using floor division,
    * and separates data cleanly via native broadcasting modulo steps.
    */
-  public unpack(packedTensor: tf.Tensor): { weight: tf.Tensor; momentum: tf.Tensor } {
+  public unpack(packedTensor: tf.Tensor): { weight: tf.Tensor; residual: tf.Tensor } {
     return tf.tidy(() => {
       const [packedIn, outFeatures] = packedTensor.shape;
 
@@ -113,9 +113,9 @@ export abstract class FourTo1BitPackingStrategy implements IBitNetStrategy {
       const uMomentum = tf.mod(sMom, FourTo1BitPackingStrategy.DIVISOR_MOMENTUM);
 
       // Reverse offset arithmetic to restore standard signed parameters [-32, 31]
-      const momentum = tf.sub(uMomentum, FourTo1BitPackingStrategy.OFFSET_MOMENTUM);
+      const residual = tf.sub(uMomentum, FourTo1BitPackingStrategy.OFFSET_MOMENTUM);
 
-      return { weight, momentum };
+      return { weight, residual };
     });
   }
 
@@ -127,7 +127,7 @@ export abstract class FourTo1BitPackingStrategy implements IBitNetStrategy {
 
   public abstract dequantizeOutputs(rawOutputs: tf.Tensor, state: PersistentState): tf.Tensor;
 
-  public abstract computeUpdate(weightTensor: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number): tf.Tensor;
+  public abstract computeUpdate(weightTensor: tf.Tensor, gradient: tf.Tensor, state: PersistentState, learningRate: number, currentStep: number): tf.Tensor;
 
   public abstract applyUpdate(weightVar: tf.Variable, update: tf.Tensor): void;
 }

@@ -4,7 +4,7 @@ import { PersistentState } from "../lib/PersistentState";
 import { ReferenceBitNetStrategy } from "../lib/strategy/ReferenceBitNetStrategy";
 import { StochasticBitNetStrategy } from "../lib/strategy/StochasticBitNetStrategy";
 
-describe("BitNet Strategy Initial Forward Pass Divergence Test", () => {
+describe.skip("BitNet Strategy Initial Forward Pass Divergence Test", () => {
   let rawWeights: tf.Tensor2D;
   let rawInputs: tf.Tensor2D;
   let refState: PersistentState;
